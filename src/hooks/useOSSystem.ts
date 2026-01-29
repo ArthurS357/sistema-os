@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import type { Database, OSHistoryItem, OSFormState } from '../types';
 
@@ -14,10 +14,16 @@ const INITIAL_FORM_STATE: OSFormState = {
 };
 
 export const useOSSystem = () => {
+    // --- ESTADOS PRINCIPAIS ---
     const [db, setDb] = useState<Database>({ ultimo_numero: 3825, historico: [] });
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState<OSFormState>(INITIAL_FORM_STATE);
     const [editingId, setEditingId] = useState<number | null>(null);
+
+    // --- ESTADOS DE OTIMIZAÇÃO (Busca e Paginação) ---
+    const [searchTerm, setSearchTerm] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 50; // Quantidade de itens por página
 
     // --- Inicialização ---
     useEffect(() => {
@@ -37,7 +43,7 @@ export const useOSSystem = () => {
     // --- Helpers Internos ---
     const saveToDisk = async (newDb: Database) => {
         setDb(newDb); // Atualiza a tela imediatamente
-        const result = await window.api.saveDatabase(newDb); // Salva no arquivo JSON
+        const result = await window.api.saveDatabase(newDb);
         if (!result.success) toast.error("Falha ao salvar no disco!");
     };
 
@@ -57,6 +63,41 @@ export const useOSSystem = () => {
         if (obs) parts.push(obs);
         return parts.join(' - ');
     };
+
+    // --- LÓGICA DE FILTRO E PAGINAÇÃO (OTIMIZAÇÃO) ---
+    const filteredAndPaginatedData = useMemo(() => {
+        // 1. Filtragem
+        let data = db.historico;
+        if (searchTerm) {
+            const lowerBusca = searchTerm.toLowerCase();
+            data = data.filter(item =>
+                item.cliente.toLowerCase().includes(lowerBusca) ||
+                item.os.toString().includes(lowerBusca) ||
+                (item.impressora && item.impressora.toLowerCase().includes(lowerBusca))
+            );
+        }
+
+        // 2. Ordenação (Sempre do mais novo para o mais antigo)
+        // Cria uma cópia para não mutar o estado original
+        const sortedData = [...data].sort((a, b) => b.os - a.os);
+
+        // 3. Paginação
+        const totalItems = sortedData.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const paginatedItems = sortedData.slice(startIndex, startIndex + itemsPerPage);
+
+        return {
+            items: paginatedItems,
+            totalPages,
+            totalItems
+        };
+    }, [db.historico, searchTerm, currentPage]);
+
+    // Reseta para página 1 se a busca mudar
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
 
     // --- Ações Públicas ---
     const handleClear = () => {
@@ -78,7 +119,7 @@ export const useOSSystem = () => {
         });
     };
 
-    // --- SALVAMENTO CORRIGIDO (ATUALIZAÇÃO INSTANTÂNEA) ---
+    // --- SALVAMENTO (Imutabilidade + Word) ---
     const handleSave = async (print: boolean) => {
         if (!form.cliente) return toast.warning('Preencha o nome do Cliente.');
 
@@ -86,7 +127,6 @@ export const useOSSystem = () => {
         const dataHoje = new Date().toLocaleDateString('pt-BR');
 
         let currentId = editingId;
-
         // CRUCIAL: Criamos uma cópia do array para o React detectar a mudança
         let newHistory = [...db.historico];
         let newUltimoNumero = db.ultimo_numero;
@@ -107,7 +147,6 @@ export const useOSSystem = () => {
                 obs: obsFinal,
                 status: form.status
             };
-            // Adiciona na cópia do array
             newHistory.push(novaOS);
         } else {
             // --- EDIÇÃO ---
@@ -127,17 +166,16 @@ export const useOSSystem = () => {
             );
         }
 
-        // Monta o novo objeto de banco completo
         const newDb: Database = {
             ultimo_numero: newUltimoNumero,
             historico: newHistory
         };
 
-        // 1. Atualiza Banco e Tela (Instantâneo)
+        // 1. Atualiza Banco e Tela
         await saveToDisk(newDb);
         handleClear();
 
-        // 2. Gera Arquivo Word em Background
+        // 2. Gera Arquivo Word
         try {
             const docResult = await window.api.generateDocx({
                 os: currentId!,
@@ -160,30 +198,22 @@ export const useOSSystem = () => {
             console.error(e);
         }
 
-        // 3. Imprime se necessário
-        if (print) {
-            window.print();
-        }
+        if (print) window.print();
     };
 
-    // --- DELETAR OTIMIZADO ---
+    // --- DELETAR (Atualiza UI Primeiro) ---
     const handleDelete = async () => {
-        if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?\nIsso excluirá também o arquivo Word.`)) return;
+        if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?`)) return;
 
         const idToDelete = editingId;
         const toastId = toast.loading("Excluindo...");
 
-        // 1. Atualiza Tela Primeiro (Filter cria novo array, então o React atualiza)
         const newHistory = db.historico.filter(item => item.os !== idToDelete);
-
-        // Recalcula ultimo numero se quiser (opcional) ou mantem o atual
-        // Para evitar conflito de IDs, geralmente mantemos o ultimo_numero crescendo
         const newDb = { ...db, historico: newHistory };
 
         await saveToDisk(newDb);
         handleClear();
 
-        // 2. Apaga Arquivo Físico em Background
         try {
             await window.api.deleteOsFile(idToDelete);
             toast.dismiss(toastId);
@@ -191,7 +221,7 @@ export const useOSSystem = () => {
         } catch (e) {
             console.error(e);
             toast.dismiss(toastId);
-            toast.warning("Registro apagado do sistema, mas erro no arquivo.");
+            toast.warning("Registro apagado, arquivo físico mantido.");
         }
     };
 
@@ -242,7 +272,23 @@ export const useOSSystem = () => {
     };
 
     return {
-        db,
+        db, // Banco original (útil para estatísticas globais)
+
+        // Use ISTO na sua Lista para ter filtro e paginação:
+        displayItems: filteredAndPaginatedData.items,
+
+        // Controles de paginação e busca
+        pagination: {
+            currentPage,
+            setCurrentPage,
+            totalPages: filteredAndPaginatedData.totalPages,
+            totalItems: filteredAndPaginatedData.totalItems
+        },
+        search: {
+            value: searchTerm,
+            onChange: setSearchTerm
+        },
+
         form,
         setForm,
         editingId,
