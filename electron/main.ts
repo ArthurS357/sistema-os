@@ -8,10 +8,8 @@ import isDev from 'electron-is-dev';
 let mainWindow: BrowserWindow | null = null;
 
 // --- DEFINIÇÃO INTELIGENTE DE CAMINHOS ---
-
-// 1. Onde salvar os dados (Banco, Backups, PDFs)?
 // Se estiver desenvolvendo (isDev): usa a pasta do projeto.
-// Se for Produção (Executável): usa a pasta onde o .exe está rodando (PORTABLE_EXECUTABLE_DIR).
+// Se for Produção (Executável): usa a pasta onde o .exe está rodando.
 const BASE_PATH = isDev
     ? path.join(__dirname, '..')
     : (process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath));
@@ -20,24 +18,21 @@ const DB_PATH = path.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path.join(BASE_PATH, 'Backups');
 
-// 2. Onde está o modelo do Word?
-// Em Dev: na raiz do projeto (subindo um nível de dist-electron).
-// Em Prod: dentro da pasta de recursos internos do Electron (resources).
+// Caminho do modelo Word
 const MODELO_PATH = isDev
     ? path.join(__dirname, '../modelo_os.docx')
     : path.join(process.resourcesPath, 'modelo_os.docx');
 
-// Garante que as pastas de saída existam (Síncrono na inicialização é ok)
+// Garante que as pastas de saída existam
 [OUTPUT_DIR, BACKUP_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// --- FUNÇÃO DE BACKUP AUTOMÁTICO (Síncrono na inicialização) ---
+// --- FUNÇÃO DE BACKUP AUTOMÁTICO ---
 function performBackup() {
     try {
         if (fs.existsSync(DB_PATH)) {
             const now = new Date();
-            // Formato: backup_YYYY-MM-DD_HH-mm.json
             const timestamp = now.toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
             const backupName = `backup_${timestamp}.json`;
             const backupPath = path.join(BACKUP_DIR, backupName);
@@ -59,8 +54,7 @@ function performBackup() {
 }
 
 function createWindow(): void {
-    // Executa o backup assim que a janela abre
-    performBackup();
+    performBackup(); // Backup ao iniciar
 
     mainWindow = new BrowserWindow({
         width: 1280,
@@ -89,7 +83,6 @@ function createWindow(): void {
 // 1. Carregar Banco de Dados
 ipcMain.handle('db-load', async () => {
     try {
-        // Verifica existência de forma síncrona (rápido), mas lê assíncrono
         if (fs.existsSync(DB_PATH)) {
             const data = await fs.promises.readFile(DB_PATH, 'utf-8');
             return JSON.parse(data);
@@ -98,7 +91,7 @@ ipcMain.handle('db-load', async () => {
     return { ultimo_numero: 3825, historico: [] };
 });
 
-// 2. Salvar Banco de Dados (Agora ASSÍNCRONO)
+// 2. Salvar Banco de Dados
 ipcMain.handle('db-save', async (event, data) => {
     try {
         const jsonContent = JSON.stringify(data, null, 4);
@@ -107,7 +100,7 @@ ipcMain.handle('db-save', async (event, data) => {
     } catch (error) { return { success: false, error: String(error) }; }
 });
 
-// 3. Gerar Arquivo Word (.docx) (Agora ASSÍNCRONO)
+// 3. Gerar Arquivo Word (.docx) (COM CORREÇÃO DE ERRO MULTI ERROR)
 ipcMain.handle('generate-docx', async (event, data) => {
     try {
         if (!fs.existsSync(MODELO_PATH)) {
@@ -115,40 +108,55 @@ ipcMain.handle('generate-docx', async (event, data) => {
             return { success: false, error: `Modelo 'modelo_os.docx' não encontrado.` };
         }
 
-        // Leitura assíncrona do modelo
         const content = await fs.promises.readFile(MODELO_PATH, 'binary');
-
         const zip = new PizZip(content);
-        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
 
-        // Converte dados para Maiúsculas para bater com as tags do Word ({CLIENTE}, {VALOR})
-        const renderData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v)]));
-        doc.render(renderData);
+        // Configuração para lidar melhor com loops e quebras de linha
+        const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true
+        });
+
+        // Converte dados para Maiúsculas e garante Strings para evitar erros
+        const renderData = Object.fromEntries(
+            Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v || '')])
+        );
+
+        // --- BLOCO DE RENDERIZAÇÃO SEGURO ---
+        try {
+            doc.render(renderData);
+        } catch (error: any) {
+            // Captura erros específicos do Docxtemplater (Tags mal formatadas, chaves abertas, etc)
+            if (error.properties && error.properties.errors) {
+                const errorMessages = error.properties.errors
+                    .map((e: any) => e.properties.explanation)
+                    .join(' | ');
+                console.error("Erro detalhado do Template:", errorMessages);
+                throw new Error(`Erro no Modelo Word: ${errorMessages}`);
+            }
+            throw error;
+        }
+        // -------------------------------------
 
         const rawName = `${data.os} - ${data.cliente} - ${data.impressora} - ${data.status}`;
-        // Sanitiza o nome do arquivo para evitar erro no Windows
         const safeName = rawName.replace(/[<>:"/\\|?*]/g, '-').trim() + ".docx";
         const filePath = path.join(OUTPUT_DIR, safeName);
 
-        // Gera o buffer
         const buffer = doc.getZip().generate({ type: 'nodebuffer' });
-
-        // Escrita assíncrona do arquivo final
         await fs.promises.writeFile(filePath, buffer);
 
         return { success: true, path: filePath };
-    } catch (error) {
+    } catch (error: any) {
         console.error("Erro ao gerar DOCX:", error);
-        return { success: false, error: String(error) };
+        return { success: false, error: error.message || String(error) };
     }
 });
 
-// 4. Escanear Arquivos (Recuperação/Sincronização) (Agora ASSÍNCRONO)
+// 4. Escanear Arquivos (Recuperação Inteligente)
 ipcMain.handle('scan-files', async () => {
     try {
         if (!fs.existsSync(OUTPUT_DIR)) return { success: false, count: 0 };
 
-        // Leitura assíncrona do diretório
         const files = await fs.promises.readdir(OUTPUT_DIR);
         const recovered = [];
         let maxId = 3825;
@@ -162,8 +170,28 @@ ipcMain.handle('scan-files', async () => {
                 if (!isNaN(id)) {
                     if (id > maxId) maxId = id;
 
-                    // Stat assíncrono para pegar a data de criação
                     const stats = await fs.promises.stat(path.join(OUTPUT_DIR, file));
+
+                    let valorRecuperado = "R$ 0,00";
+                    let telefoneRecuperado = "";
+
+                    // Leitura Inteligente do Conteúdo
+                    try {
+                        const content = await fs.promises.readFile(path.join(OUTPUT_DIR, file), 'binary');
+                        const zip = new PizZip(content);
+                        if (zip.files['word/document.xml']) {
+                            const xmlText = zip.files['word/document.xml'].asText();
+                            const cleanText = xmlText.replace(/<[^>]+>/g, ' ');
+
+                            const valorMatch = cleanText.match(/R\$\s?[\d.,]+/);
+                            if (valorMatch) valorRecuperado = valorMatch[0];
+
+                            const telMatch = cleanText.match(/\(\d{2}\)\s?\d{4,5}-?\d{4}/);
+                            if (telMatch) telefoneRecuperado = telMatch[0];
+                        }
+                    } catch (readError) {
+                        console.warn(`Não foi possível ler conteúdo interno de ${file}`);
+                    }
 
                     recovered.push({
                         os: id,
@@ -171,10 +199,10 @@ ipcMain.handle('scan-files', async () => {
                         cliente: parts[1] || "Desconhecido",
                         impressora: parts[2] || "Geral",
                         status: parts[3] || "Em Análise",
-                        valor: "R$ 0,00",
-                        telefone: "",
+                        valor: valorRecuperado,
+                        telefone: telefoneRecuperado,
                         orcamento: "Recuperado de Arquivo",
-                        obs: "Sincronizado automaticamente"
+                        obs: "Sincronizado via Arquivo Word"
                     });
                 }
             }
@@ -186,35 +214,24 @@ ipcMain.handle('scan-files', async () => {
 
 // --- COMANDOS DE ARQUIVO/PASTA ---
 
-// Abre pastas do sistema (Backups ou OS_Geradas)
 ipcMain.handle('open-folder', async (event, type) => {
     const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
-    // Garante que a pasta existe antes de abrir
     if (!fs.existsSync(target)) await fs.promises.mkdir(target, { recursive: true });
     await shell.openPath(target);
 });
 
-// Tenta encontrar e abrir o arquivo da O.S. pelo ID
 ipcMain.handle('open-os-file', async (event, osId) => {
     try {
         if (!fs.existsSync(OUTPUT_DIR)) return { success: false, error: 'Pasta vazia' };
-
-        // Leitura assíncrona do diretório
         const files = await fs.promises.readdir(OUTPUT_DIR);
-
-        // Procura qualquer arquivo que comece com "ID - "
         const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
-
         if (file) {
-            const fullPath = path.join(OUTPUT_DIR, file);
-            await shell.openPath(fullPath);
+            await shell.openPath(path.join(OUTPUT_DIR, file));
             return { success: true };
         } else {
             return { success: false, error: 'Arquivo não encontrado.' };
         }
-    } catch (e) {
-        return { success: false, error: String(e) };
-    }
+    } catch (e) { return { success: false, error: String(e) }; }
 });
 
 app.whenReady().then(createWindow);

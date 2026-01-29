@@ -11,18 +11,15 @@ const docxtemplater_1 = __importDefault(require("docxtemplater"));
 const electron_is_dev_1 = __importDefault(require("electron-is-dev"));
 let mainWindow = null;
 // --- DEFINIÇÃO INTELIGENTE DE CAMINHOS ---
-// 1. Onde salvar os dados (Banco, Backups, PDFs)?
 // Se estiver desenvolvendo (isDev): usa a pasta do projeto.
-// Se for Produção (Executável): usa a pasta onde o .exe está rodando (PORTABLE_EXECUTABLE_DIR).
+// Se for Produção (Executável): usa a pasta onde o .exe está rodando.
 const BASE_PATH = electron_is_dev_1.default
     ? path_1.default.join(__dirname, '..')
     : (process.env.PORTABLE_EXECUTABLE_DIR || path_1.default.dirname(process.execPath));
 const DB_PATH = path_1.default.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path_1.default.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path_1.default.join(BASE_PATH, 'Backups');
-// 2. Onde está o modelo do Word?
-// Em Dev: na raiz do projeto (subindo um nível de dist-electron).
-// Em Prod: dentro da pasta de recursos internos do Electron (resources).
+// Caminho do modelo Word
 const MODELO_PATH = electron_is_dev_1.default
     ? path_1.default.join(__dirname, '../modelo_os.docx')
     : path_1.default.join(process.resourcesPath, 'modelo_os.docx');
@@ -36,7 +33,6 @@ function performBackup() {
     try {
         if (fs_1.default.existsSync(DB_PATH)) {
             const now = new Date();
-            // Formato: backup_YYYY-MM-DD_HH-mm.json
             const timestamp = now.toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
             const backupName = `backup_${timestamp}.json`;
             const backupPath = path_1.default.join(BACKUP_DIR, backupName);
@@ -56,8 +52,7 @@ function performBackup() {
     }
 }
 function createWindow() {
-    // Executa o backup assim que a janela abre
-    performBackup();
+    performBackup(); // Backup ao iniciar
     mainWindow = new electron_1.BrowserWindow({
         width: 1280,
         height: 800,
@@ -81,8 +76,10 @@ function createWindow() {
 // 1. Carregar Banco de Dados
 electron_1.ipcMain.handle('db-load', async () => {
     try {
-        if (fs_1.default.existsSync(DB_PATH))
-            return JSON.parse(fs_1.default.readFileSync(DB_PATH, 'utf-8'));
+        if (fs_1.default.existsSync(DB_PATH)) {
+            const data = await fs_1.default.promises.readFile(DB_PATH, 'utf-8');
+            return JSON.parse(data);
+        }
     }
     catch (error) {
         console.error(error);
@@ -92,67 +89,106 @@ electron_1.ipcMain.handle('db-load', async () => {
 // 2. Salvar Banco de Dados
 electron_1.ipcMain.handle('db-save', async (event, data) => {
     try {
-        fs_1.default.writeFileSync(DB_PATH, JSON.stringify(data, null, 4), 'utf-8');
+        const jsonContent = JSON.stringify(data, null, 4);
+        await fs_1.default.promises.writeFile(DB_PATH, jsonContent, 'utf-8');
         return { success: true };
     }
     catch (error) {
         return { success: false, error: String(error) };
     }
 });
-// 3. Gerar Arquivo Word (.docx)
+// 3. Gerar Arquivo Word (.docx) (COM CORREÇÃO DE ERRO MULTI ERROR)
 electron_1.ipcMain.handle('generate-docx', async (event, data) => {
     try {
-        // Verifica se o modelo existe (agora usando o caminho correto para Prod)
         if (!fs_1.default.existsSync(MODELO_PATH)) {
             console.error("Modelo não encontrado em:", MODELO_PATH);
             return { success: false, error: `Modelo 'modelo_os.docx' não encontrado.` };
         }
-        const content = fs_1.default.readFileSync(MODELO_PATH, 'binary');
-        const doc = new docxtemplater_1.default(new pizzip_1.default(content), { paragraphLoop: true, linebreaks: true });
-        // Converte dados para Maiúsculas para bater com as tags do Word ({CLIENTE}, {VALOR})
-        const renderData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v)]));
-        doc.render(renderData);
+        const content = await fs_1.default.promises.readFile(MODELO_PATH, 'binary');
+        const zip = new pizzip_1.default(content);
+        // Configuração para lidar melhor com loops e quebras de linha
+        const doc = new docxtemplater_1.default(zip, {
+            paragraphLoop: true,
+            linebreaks: true
+        });
+        // Converte dados para Maiúsculas e garante Strings para evitar erros
+        const renderData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v || '')]));
+        // --- BLOCO DE RENDERIZAÇÃO SEGURO ---
+        try {
+            doc.render(renderData);
+        }
+        catch (error) {
+            // Captura erros específicos do Docxtemplater (Tags mal formatadas, chaves abertas, etc)
+            if (error.properties && error.properties.errors) {
+                const errorMessages = error.properties.errors
+                    .map((e) => e.properties.explanation)
+                    .join(' | ');
+                console.error("Erro detalhado do Template:", errorMessages);
+                throw new Error(`Erro no Modelo Word: ${errorMessages}`);
+            }
+            throw error;
+        }
+        // -------------------------------------
         const rawName = `${data.os} - ${data.cliente} - ${data.impressora} - ${data.status}`;
-        // Sanitiza o nome do arquivo para evitar erro no Windows
         const safeName = rawName.replace(/[<>:"/\\|?*]/g, '-').trim() + ".docx";
         const filePath = path_1.default.join(OUTPUT_DIR, safeName);
-        fs_1.default.writeFileSync(filePath, doc.getZip().generate({ type: 'nodebuffer' }));
+        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+        await fs_1.default.promises.writeFile(filePath, buffer);
         return { success: true, path: filePath };
     }
     catch (error) {
         console.error("Erro ao gerar DOCX:", error);
-        return { success: false, error: String(error) };
+        return { success: false, error: error.message || String(error) };
     }
 });
-// 4. Escanear Arquivos (Recuperação/Sincronização)
+// 4. Escanear Arquivos (Recuperação Inteligente)
 electron_1.ipcMain.handle('scan-files', async () => {
     try {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: false, count: 0 };
-        const files = fs_1.default.readdirSync(OUTPUT_DIR);
+        const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
         const recovered = [];
         let maxId = 3825;
         for (const file of files) {
             if (!file.endsWith('.docx'))
                 continue;
-            // Espera formato: "3850 - Nome - Impressora - Status.docx"
             const parts = file.replace('.docx', '').split(' - ');
             if (parts.length >= 2) {
                 const id = parseInt(parts[0]);
                 if (!isNaN(id)) {
                     if (id > maxId)
                         maxId = id;
-                    const stats = fs_1.default.statSync(path_1.default.join(OUTPUT_DIR, file));
+                    const stats = await fs_1.default.promises.stat(path_1.default.join(OUTPUT_DIR, file));
+                    let valorRecuperado = "R$ 0,00";
+                    let telefoneRecuperado = "";
+                    // Leitura Inteligente do Conteúdo
+                    try {
+                        const content = await fs_1.default.promises.readFile(path_1.default.join(OUTPUT_DIR, file), 'binary');
+                        const zip = new pizzip_1.default(content);
+                        if (zip.files['word/document.xml']) {
+                            const xmlText = zip.files['word/document.xml'].asText();
+                            const cleanText = xmlText.replace(/<[^>]+>/g, ' ');
+                            const valorMatch = cleanText.match(/R\$\s?[\d.,]+/);
+                            if (valorMatch)
+                                valorRecuperado = valorMatch[0];
+                            const telMatch = cleanText.match(/\(\d{2}\)\s?\d{4,5}-?\d{4}/);
+                            if (telMatch)
+                                telefoneRecuperado = telMatch[0];
+                        }
+                    }
+                    catch (readError) {
+                        console.warn(`Não foi possível ler conteúdo interno de ${file}`);
+                    }
                     recovered.push({
                         os: id,
                         data: stats.birthtime.toLocaleDateString('pt-BR'),
                         cliente: parts[1] || "Desconhecido",
                         impressora: parts[2] || "Geral",
                         status: parts[3] || "Em Análise",
-                        valor: "R$ 0,00", // Valor infelizmente não fica no nome do arquivo
-                        telefone: "",
+                        valor: valorRecuperado,
+                        telefone: telefoneRecuperado,
                         orcamento: "Recuperado de Arquivo",
-                        obs: "Sincronizado automaticamente"
+                        obs: "Sincronizado via Arquivo Word"
                     });
                 }
             }
@@ -165,25 +201,20 @@ electron_1.ipcMain.handle('scan-files', async () => {
     }
 });
 // --- COMANDOS DE ARQUIVO/PASTA ---
-// Abre pastas do sistema (Backups ou OS_Geradas)
 electron_1.ipcMain.handle('open-folder', async (event, type) => {
     const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
-    // Garante que a pasta existe antes de abrir
     if (!fs_1.default.existsSync(target))
-        fs_1.default.mkdirSync(target, { recursive: true });
+        await fs_1.default.promises.mkdir(target, { recursive: true });
     await electron_1.shell.openPath(target);
 });
-// Tenta encontrar e abrir o arquivo da O.S. pelo ID
 electron_1.ipcMain.handle('open-os-file', async (event, osId) => {
     try {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: false, error: 'Pasta vazia' };
-        const files = fs_1.default.readdirSync(OUTPUT_DIR);
-        // Procura qualquer arquivo que comece com "ID - "
+        const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
         const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
         if (file) {
-            const fullPath = path_1.default.join(OUTPUT_DIR, file);
-            await electron_1.shell.openPath(fullPath);
+            await electron_1.shell.openPath(path_1.default.join(OUTPUT_DIR, file));
             return { success: true };
         }
         else {

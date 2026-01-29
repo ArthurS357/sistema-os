@@ -74,10 +74,11 @@ export const useOSSystem = () => {
             valor: os.valor,
             obs: os.obs,
             status: os.status,
-            cabos: { forca: false, usb: false, cartuchos: false, ligando: false } // Reseta cabos pois não salvamos isso no histórico antigo
+            cabos: { forca: false, usb: false, cartuchos: false, ligando: false }
         });
     };
 
+    // --- SALVAMENTO COM GERAÇÃO AUTOMÁTICA ---
     const handleSave = async (print: boolean) => {
         if (!form.cliente) return toast.warning('Preencha o nome do Cliente.');
 
@@ -86,6 +87,7 @@ export const useOSSystem = () => {
         let newDb = { ...db };
         let currentId = editingId;
 
+        // 1. Atualiza o Estado (Memória)
         if (editingId === null) {
             currentId = db.ultimo_numero + 1;
             const novaOS: OSHistoryItem = {
@@ -109,34 +111,36 @@ export const useOSSystem = () => {
             );
         }
 
+        // 2. Salva o Banco de Dados (JSON)
         await saveToDisk(newDb);
         handleClear();
 
-        if (print) {
-            const toastId = toast.loading("Gerando documento...");
-            try {
-                const result = await window.api.generateDocx({
-                    os: currentId!,
-                    data: dataHoje,
-                    cliente: form.cliente,
-                    impressora: form.impressora,
-                    orcamento: form.orcamento,
-                    valor: form.valor,
-                    status: form.status,
-                    obs: obsFinal
-                });
-                toast.dismiss(toastId);
-                if (result.success) {
-                    window.print();
-                    toast.success(`O.S. ${currentId} impressa!`);
-                } else {
-                    toast.error("Erro Word: " + result.error);
-                }
-            } catch (e) {
-                toast.error("Erro interno ao imprimir.");
+        // 3. SEMPRE Gera o Arquivo Word (Backup Físico)
+        try {
+            const docResult = await window.api.generateDocx({
+                os: currentId!,
+                data: dataHoje,
+                cliente: form.cliente,
+                telefone: form.telefone,
+                impressora: form.impressora,
+                orcamento: form.orcamento,
+                valor: form.valor,
+                status: form.status,
+                obs: obsFinal
+            });
+
+            if (docResult.success) {
+                if (!print) toast.success(`O.S. ${currentId} salva e gerada!`);
+            } else {
+                toast.error(`Salvo no banco, mas erro no Word: ${docResult.error}`);
             }
-        } else {
-            toast.success(editingId ? `O.S. ${currentId} salva!` : `O.S. ${currentId} gerada!`);
+        } catch (e) {
+            console.error(e);
+        }
+
+        // 4. Se o usuário pediu para imprimir, chama a tela de impressão
+        if (print) {
+            window.print();
         }
     };
 
@@ -197,16 +201,12 @@ export const useOSSystem = () => {
         else toast.error("Arquivo não encontrado.");
     };
 
-    // Retornamos tudo que a UI precisa consumir
     return {
-        // Estado
         db,
         form,
-        setForm, // O Form ainda precisa atualizar campos individuais
+        setForm,
         editingId,
         loading,
-
-        // Ações
         actions: {
             save: handleSave,
             edit: handleEdit,
