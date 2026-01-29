@@ -1,27 +1,4 @@
 {
-    "ultimo_numero": 3827,
-    "historico": [
-        {
-            "os": 3826,
-            "data": "29/01/2026",
-            "cliente": "asd",
-            "telefone": "(13) 12312-3123",
-            "impressora": "asdasd",
-            "orcamento": "Em andamento",
-            "valor": "R$ 1.231,23",
-            "obs": "[LIGANDO] - Deixou: Cartuchos Ass. - asd",
-            "status": "Em Análise"
-        },
-        {
-            "os": 3827,
-            "data": "29/01/2026",
-            "cliente": "asdasd",
-            "telefone": "(12) 31231-2312",
-            "impressora": "asdasdasd",
-            "orcamento": "Em andamento",
-            "valor": "R$ 1.231.231,23",
-            "obs": "[LIGANDO] - Deixou: Cabo Força",
-            "status": "Em Análise"
-        }
-    ]
+    "ultimo_numero": 3828,
+    "historico": []
 }
