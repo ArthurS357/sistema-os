@@ -1,4 +1,16 @@
 {
-    "historico": [],
-    "ultimo_numero": 3825
+    "historico": [
+        {
+            "os": 3826,
+            "data": "29/01/2026",
+            "cliente": "arthur",
+            "telefone": "(11) 99638-8698",
+            "impressora": "epson",
+            "orcamento": "Em andamento",
+            "valor": "R$ 233,33",
+            "obs": "[LIGANDO] - Deixou: Cabo Força - aaaa",
+            "status": "Em Análise"
+        }
+    ],
+    "ultimo_numero": 3826
 }

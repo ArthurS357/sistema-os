@@ -1,8 +1,7 @@
 import React, { useMemo } from 'react';
 import { Calendar, TrendingUp, DollarSign } from 'lucide-react';
-
-// --- CORREÇÃO AQUI: Adicionado 'type' ---
 import type { OSHistoryItem } from '../types';
+import { parseCurrency, formatCurrencyDisplay } from '../utils/formatters';
 
 interface DashboardStatsProps {
     historico: OSHistoryItem[];
@@ -13,19 +12,19 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico }) => 
         const hoje = new Date().toLocaleDateString('pt-BR');
         const osHoje = historico.filter(i => i.data === hoje);
 
-        // Função auxiliar para converter string de moeda em float
-        const parseVal = (v: string) => parseFloat(v.replace(/[^0-9,-]+/g, "").replace(",", ".") || '0');
-
-        const faturamentoHoje = osHoje.reduce((acc, curr) => acc + parseVal(curr.valor), 0);
+        // Converte e soma usando o utilitário seguro 'parseCurrency'
+        const faturamentoHoje = osHoje.reduce((acc, curr) => acc + parseCurrency(curr.valor), 0);
 
         const chartData = [];
         for (let i = 4; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dateStr = d.toLocaleDateString('pt-BR');
+
             const dayTotal = historico
                 .filter(item => item.data === dateStr)
-                .reduce((acc, curr) => acc + parseVal(curr.valor), 0);
+                .reduce((acc, curr) => acc + parseCurrency(curr.valor), 0);
+
             chartData.push({ day: dateStr.slice(0, 5), value: dayTotal });
         }
 
@@ -33,7 +32,8 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico }) => 
 
         return {
             count: osHoje.length,
-            total: faturamentoHoje.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+            // Formata o total para exibição (ex: R$ 1.250,00)
+            total: formatCurrencyDisplay(faturamentoHoje),
             chart: chartData.map(c => ({ ...c, height: (c.value / maxVal) * 100 }))
         };
     }, [historico]);
@@ -66,9 +66,9 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico }) => 
                             ></div>
                             <span className="text-[10px] text-slate-400 text-center mt-1">{day.day}</span>
 
-                            {/* Tooltip do valor */}
+                            {/* Tooltip do valor (também formatado) */}
                             <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-20">
-                                R$ {day.value.toFixed(2)}
+                                {formatCurrencyDisplay(day.value)}
                             </div>
                         </div>
                     ))}

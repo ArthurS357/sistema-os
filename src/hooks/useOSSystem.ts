@@ -36,8 +36,8 @@ export const useOSSystem = () => {
 
     // --- Helpers Internos ---
     const saveToDisk = async (newDb: Database) => {
-        setDb(newDb);
-        const result = await window.api.saveDatabase(newDb);
+        setDb(newDb); // Atualiza a tela imediatamente
+        const result = await window.api.saveDatabase(newDb); // Salva no arquivo JSON
         if (!result.success) toast.error("Falha ao salvar no disco!");
     };
 
@@ -78,7 +78,7 @@ export const useOSSystem = () => {
         });
     };
 
-    // --- SALVAMENTO COM GERAÇÃO AUTOMÁTICA ---
+    // --- SALVAMENTO (Salva Banco + Gera Word) ---
     const handleSave = async (print: boolean) => {
         if (!form.cliente) return toast.warning('Preencha o nome do Cliente.');
 
@@ -115,7 +115,7 @@ export const useOSSystem = () => {
         await saveToDisk(newDb);
         handleClear();
 
-        // 3. SEMPRE Gera o Arquivo Word (Backup Físico)
+        // 3. Gera o Arquivo Word (Backup Físico)
         try {
             const docResult = await window.api.generateDocx({
                 os: currentId!,
@@ -138,34 +138,37 @@ export const useOSSystem = () => {
             console.error(e);
         }
 
-        // 4. Se o usuário pediu para imprimir, chama a tela de impressão
+        // 4. Imprime se solicitado
         if (print) {
             window.print();
         }
     };
 
-    // --- DELETAR (BANCO + ARQUIVO) ---
+    // --- DELETAR OTIMIZADO (Atualiza Tela Primeiro -> Depois Arquivo) ---
     const handleDelete = async () => {
         if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?\nIsso excluirá também o arquivo Word.`)) return;
 
-        const toastId = toast.loading("Apagando registros...");
+        const idToDelete = editingId;
+        const toastId = toast.loading("Excluindo...");
 
-        // 1. Tenta apagar o arquivo físico
-        try {
-            await window.api.deleteOsFile(editingId);
-        } catch (e) {
-            console.error("Erro ao apagar arquivo físico (pode já não existir).", e);
-        }
-
-        // 2. Apaga do Banco de Dados
-        const newHistory = db.historico.filter(item => item.os !== editingId);
+        // 1. Atualiza Banco e UI Primeiro (Instantâneo)
+        const newHistory = db.historico.filter(item => item.os !== idToDelete);
         const maxId = newHistory.length > 0 ? Math.max(...newHistory.map(i => i.os)) : 3825;
+        const newDb = { ultimo_numero: maxId, historico: newHistory };
 
-        await saveToDisk({ historico: newHistory, ultimo_numero: maxId });
-
-        toast.dismiss(toastId);
+        await saveToDisk(newDb); // O React atualiza a tela aqui
         handleClear();
-        toast.success("O.S. e Arquivo excluídos com sucesso!");
+
+        // 2. Apaga Arquivo Físico (Sem travar a tela)
+        try {
+            await window.api.deleteOsFile(idToDelete);
+            toast.dismiss(toastId);
+            toast.success("Registro e arquivo excluídos!");
+        } catch (e) {
+            console.error(e);
+            toast.dismiss(toastId);
+            toast.warning("Registro apagado, mas erro ao apagar arquivo físico.");
+        }
     };
 
     const handleSyncFiles = async () => {

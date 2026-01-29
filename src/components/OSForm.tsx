@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { OSFormState } from '../types';
+import { formatPhone, formatCurrencyInput, cleanPhone } from '../utils/formatters';
 
 interface OSFormProps {
     form: OSFormState;
@@ -20,25 +21,9 @@ export const OSForm: React.FC<OSFormProps> = ({
     form, setForm, editingId, onSave, onClear, onDelete, onOpenWord
 }) => {
 
-    // --- Máscaras Locais ---
-    const formatPhone = (value: string) => {
-        const v = value.replace(/\D/g, "").substring(0, 11);
-        if (v.length > 10) return `(${v.substring(0, 2)}) ${v.substring(2, 7)}-${v.substring(7)}`;
-        if (v.length > 6) return `(${v.substring(0, 2)}) ${v.substring(2, 6)}-${v.substring(6)}`;
-        if (v.length > 2) return `(${v.substring(0, 2)}) ${v.substring(2)}`;
-        return v;
-    };
-
-    const formatCurrency = (value: string) => {
-        let v = value.replace(/\D/g, "");
-        v = (parseInt(v) / 100).toFixed(2) + "";
-        v = v.replace(".", ",");
-        v = v.replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
-        return v === "NaN" ? "" : `R$ ${v}`;
-    };
-
     const openWhatsapp = () => {
-        const num = form.telefone.replace(/\D/g, '');
+        // Usa a função utilitária para limpar o número
+        const num = cleanPhone(form.telefone);
         if (num.length >= 10) window.open(`https://wa.me/55${num}`, '_blank');
         else toast.warning('Número inválido.');
     };
@@ -71,9 +56,27 @@ export const OSForm: React.FC<OSFormProps> = ({
                     <div className="space-y-3">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><User size={14} /> Cliente</h3>
                         <div className="grid gap-4">
-                            <div className="relative group"><User size={18} className="absolute left-3 top-3 text-slate-400 group-focus-within:text-blue-500" /><input className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" placeholder="Nome" value={form.cliente} onChange={e => setForm({ ...form, cliente: e.target.value })} /></div>
+                            <div className="relative group">
+                                <User size={18} className="absolute left-3 top-3 text-slate-400 group-focus-within:text-blue-500" />
+                                <input
+                                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                    placeholder="Nome"
+                                    value={form.cliente}
+                                    onChange={e => setForm({ ...form, cliente: e.target.value })}
+                                />
+                            </div>
                             <div className="flex gap-2">
-                                <div className="relative flex-1 group"><Phone size={18} className="absolute left-3 top-3 text-slate-400 group-focus-within:text-blue-500" /><input className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" placeholder="(00) 00000-0000" value={form.telefone} onChange={e => setForm({ ...form, telefone: formatPhone(e.target.value) })} maxLength={15} /></div>
+                                <div className="relative flex-1 group">
+                                    <Phone size={18} className="absolute left-3 top-3 text-slate-400 group-focus-within:text-blue-500" />
+                                    <input
+                                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                        placeholder="(00) 00000-0000"
+                                        value={form.telefone}
+                                        // Uso do formatPhone importado
+                                        onChange={e => setForm({ ...form, telefone: formatPhone(e.target.value) })}
+                                        maxLength={15}
+                                    />
+                                </div>
                                 <button onClick={openWhatsapp} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 rounded-lg font-bold">Zap</button>
                             </div>
                         </div>
@@ -93,7 +96,16 @@ export const OSForm: React.FC<OSFormProps> = ({
                     <div className="space-y-3">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2"><DollarSign size={14} /> Fechamento</h3>
                         <div className="flex gap-3">
-                            <div className="flex-1 relative group"><input className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-lg text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-right" placeholder="R$ 0,00" value={form.valor} onChange={e => setForm({ ...form, valor: formatCurrency(e.target.value) })} onKeyDown={e => e.key === 'Enter' && onSave(false)} /></div>
+                            <div className="flex-1 relative group">
+                                <input
+                                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-lg text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-right"
+                                    placeholder="R$ 0,00"
+                                    value={form.valor}
+                                    // Uso do formatCurrencyInput importado
+                                    onChange={e => setForm({ ...form, valor: formatCurrencyInput(e.target.value) })}
+                                    onKeyDown={e => e.key === 'Enter' && onSave(false)}
+                                />
+                            </div>
                             <div className="flex-1"><select className="w-full h-full px-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 cursor-pointer text-sm font-medium" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option>Em Análise</option><option>Aprovado</option><option>Reprovado</option><option>Aprovado - Entregue</option><option>Reprovado - Entregue</option></select></div>
                         </div>
                         <textarea className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 resize-none text-sm h-20" placeholder="Obs extras..." value={form.obs} onChange={e => setForm({ ...form, obs: e.target.value })} onKeyDown={e => e.key === 'Enter' && onSave(false)} />
