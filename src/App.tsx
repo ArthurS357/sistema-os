@@ -2,28 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Save, Printer, Trash2, Search, RefreshCw, Phone,
   FileText, PenTool, DollarSign, CheckCircle, AlertCircle,
-  Clock, Package, Monitor, User, TrendingUp, Calendar, Database,
+  Clock, Package, Monitor, User, Database as IconDatabase,
   FolderOpen, FolderArchive
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 
-// --- Tipagem ---
-interface OSHistoryItem {
-  os: number;
-  data: string;
-  cliente: string;
-  telefone: string;
-  impressora: string;
-  orcamento: string;
-  valor: string;
-  obs: string;
-  status: string;
-}
+// --- CORREÇÃO AQUI: Adicionado 'type' ---
+import type { Database, OSHistoryItem } from './types';
 
-interface Database {
-  ultimo_numero: number;
-  historico: OSHistoryItem[];
-}
+import { DashboardStats } from './components/DashboardStats';
 
 const INITIAL_FORM_STATE = {
   cliente: '',
@@ -64,24 +51,17 @@ const App: React.FC = () => {
     loadData();
   }, []);
 
-  // --- NOVAS AÇÕES DE ARQUIVO ---
-
-  // Abre as pastas do sistema (OS_Geradas ou Backups)
+  // --- AÇÕES DE ARQUIVO ---
   const handleOpenFolder = (type: 'os' | 'backup') => {
     window.api.openFolder(type);
     toast.success(`Pasta ${type === 'os' ? 'de O.S.' : 'de Backups'} aberta!`);
   };
 
-  // Abre o arquivo Word específico da O.S. selecionada
   const handleOpenWord = async () => {
     if (!editingId) return;
     const loadToast = toast.loading("Buscando arquivo...");
-
-    // O backend vai procurar o arquivo pelo ID (ex: "3850 - ...")
     const result = await window.api.openOsFile(editingId);
-
     toast.dismiss(loadToast);
-
     if (result.success) {
       toast.success("Arquivo aberto com sucesso!");
     } else {
@@ -89,10 +69,8 @@ const App: React.FC = () => {
     }
   };
 
-  // Sincroniza/Recupera banco lendo os arquivos
   const handleSyncFiles = async () => {
     if (!confirm("Isso vai ler a pasta 'OS_Geradas' e recuperar O.S. perdidas.\nDeseja continuar?")) return;
-
     const loadToast = toast.loading("Escaneando arquivos...");
     try {
       const result = await window.api.scanFiles();
@@ -139,31 +117,7 @@ const App: React.FC = () => {
     return v === "NaN" ? "" : `R$ ${v}`;
   };
 
-  // --- DASHBOARD ---
-  const stats = useMemo(() => {
-    const hoje = new Date().toLocaleDateString('pt-BR');
-    const osHoje = db.historico.filter(i => i.data === hoje);
-    const parseVal = (v: string) => parseFloat(v.replace(/[^0-9,-]+/g, "").replace(",", ".") || '0');
-    const faturamentoHoje = osHoje.reduce((acc, curr) => acc + parseVal(curr.valor), 0);
-
-    const chartData = [];
-    for (let i = 4; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('pt-BR');
-      const dayTotal = db.historico.filter(item => item.data === dateStr).reduce((acc, curr) => acc + parseVal(curr.valor), 0);
-      chartData.push({ day: dateStr.slice(0, 5), value: dayTotal });
-    }
-    const maxVal = Math.max(...chartData.map(c => c.value)) || 1;
-
-    return {
-      count: osHoje.length,
-      total: faturamentoHoje.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-      chart: chartData.map(c => ({ ...c, height: (c.value / maxVal) * 100 }))
-    };
-  }, [db.historico]);
-
-  // --- Funções CRUD ---
+  // --- CRUD ---
   const saveToDisk = async (newDb: Database) => {
     setDb(newDb);
     const result = await window.api.saveDatabase(newDb);
@@ -362,13 +316,8 @@ const App: React.FC = () => {
 
       {/* --- LISTA DIREITA --- */}
       <div className="flex-1 flex flex-col gap-5 h-full">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between h-32 relative overflow-hidden">
-            <div className="flex justify-between items-start z-10"><div><p className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1"><Calendar size={12} /> Últimos 5 dias</p><p className="text-2xl font-bold text-slate-700 mt-1">{stats.count} <span className="text-sm text-slate-400 font-normal">O.S. Hoje</span></p></div><div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><TrendingUp size={20} /></div></div>
-            <div className="flex items-end gap-2 h-12 mt-2 z-10">{stats.chart.map((day, i) => (<div key={i} className="flex-1 flex flex-col justify-end group cursor-help relative"><div className="w-full bg-blue-200 rounded-t-sm group-hover:bg-blue-400 transition-all" style={{ height: `${Math.max(day.height, 10)}%` }}></div><span className="text-[10px] text-slate-400 text-center mt-1">{day.day}</span><div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap">R$ {day.value}</div></div>))}</div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between"><div><p className="text-xs font-bold text-slate-400 uppercase">Faturamento Hoje</p><p className="text-3xl font-bold text-emerald-600 tracking-tight">{stats.total}</p><p className="text-xs text-slate-400 mt-1">Calculado sobre O.S. do dia</p></div><div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl"><DollarSign size={32} /></div></div>
-        </div>
+        {/* COMPONENTE DASHBOARD IMPORTADO */}
+        <DashboardStats historico={db.historico} />
 
         <div className="bg-white flex-1 rounded-2xl shadow-xl border border-slate-100 flex flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex gap-3 bg-slate-50/50">
@@ -383,7 +332,7 @@ const App: React.FC = () => {
                 <FolderArchive size={20} />
               </button>
               <button onClick={handleSyncFiles} className="p-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 rounded-xl shadow-sm transition-all" title="Sincronizar Arquivos">
-                <Database size={20} />
+                <IconDatabase size={20} />
               </button>
             </div>
           </div>
