@@ -21,18 +21,18 @@ const OUTPUT_DIR = path.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path.join(BASE_PATH, 'Backups');
 
 // 2. Onde está o modelo do Word?
-// Em Dev: na raiz do projeto.
-// Em Prod: dentro da pasta de recursos internos do Electron (process.resourcesPath).
+// Em Dev: na raiz do projeto (subindo um nível de dist-electron).
+// Em Prod: dentro da pasta de recursos internos do Electron (resources).
 const MODELO_PATH = isDev
     ? path.join(__dirname, '../modelo_os.docx')
     : path.join(process.resourcesPath, 'modelo_os.docx');
 
-// Garante que as pastas de saída existam
+// Garante que as pastas de saída existam (Síncrono na inicialização é ok)
 [OUTPUT_DIR, BACKUP_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// --- FUNÇÃO DE BACKUP AUTOMÁTICO ---
+// --- FUNÇÃO DE BACKUP AUTOMÁTICO (Síncrono na inicialização) ---
 function performBackup() {
     try {
         if (fs.existsSync(DB_PATH)) {
@@ -89,30 +89,37 @@ function createWindow(): void {
 // 1. Carregar Banco de Dados
 ipcMain.handle('db-load', async () => {
     try {
-        if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+        // Verifica existência de forma síncrona (rápido), mas lê assíncrono
+        if (fs.existsSync(DB_PATH)) {
+            const data = await fs.promises.readFile(DB_PATH, 'utf-8');
+            return JSON.parse(data);
+        }
     } catch (error) { console.error(error); }
     return { ultimo_numero: 3825, historico: [] };
 });
 
-// 2. Salvar Banco de Dados
+// 2. Salvar Banco de Dados (Agora ASSÍNCRONO)
 ipcMain.handle('db-save', async (event, data) => {
     try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 4), 'utf-8');
+        const jsonContent = JSON.stringify(data, null, 4);
+        await fs.promises.writeFile(DB_PATH, jsonContent, 'utf-8');
         return { success: true };
     } catch (error) { return { success: false, error: String(error) }; }
 });
 
-// 3. Gerar Arquivo Word (.docx)
+// 3. Gerar Arquivo Word (.docx) (Agora ASSÍNCRONO)
 ipcMain.handle('generate-docx', async (event, data) => {
     try {
-        // Verifica se o modelo existe (agora usando o caminho correto para Prod)
         if (!fs.existsSync(MODELO_PATH)) {
             console.error("Modelo não encontrado em:", MODELO_PATH);
             return { success: false, error: `Modelo 'modelo_os.docx' não encontrado.` };
         }
 
-        const content = fs.readFileSync(MODELO_PATH, 'binary');
-        const doc = new Docxtemplater(new PizZip(content), { paragraphLoop: true, linebreaks: true });
+        // Leitura assíncrona do modelo
+        const content = await fs.promises.readFile(MODELO_PATH, 'binary');
+
+        const zip = new PizZip(content);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
 
         // Converte dados para Maiúsculas para bater com as tags do Word ({CLIENTE}, {VALOR})
         const renderData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v)]));
@@ -123,7 +130,12 @@ ipcMain.handle('generate-docx', async (event, data) => {
         const safeName = rawName.replace(/[<>:"/\\|?*]/g, '-').trim() + ".docx";
         const filePath = path.join(OUTPUT_DIR, safeName);
 
-        fs.writeFileSync(filePath, doc.getZip().generate({ type: 'nodebuffer' }));
+        // Gera o buffer
+        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+
+        // Escrita assíncrona do arquivo final
+        await fs.promises.writeFile(filePath, buffer);
+
         return { success: true, path: filePath };
     } catch (error) {
         console.error("Erro ao gerar DOCX:", error);
@@ -131,30 +143,35 @@ ipcMain.handle('generate-docx', async (event, data) => {
     }
 });
 
-// 4. Escanear Arquivos (Recuperação/Sincronização)
+// 4. Escanear Arquivos (Recuperação/Sincronização) (Agora ASSÍNCRONO)
 ipcMain.handle('scan-files', async () => {
     try {
         if (!fs.existsSync(OUTPUT_DIR)) return { success: false, count: 0 };
-        const files = fs.readdirSync(OUTPUT_DIR);
+
+        // Leitura assíncrona do diretório
+        const files = await fs.promises.readdir(OUTPUT_DIR);
         const recovered = [];
         let maxId = 3825;
 
         for (const file of files) {
             if (!file.endsWith('.docx')) continue;
-            // Espera formato: "3850 - Nome - Impressora - Status.docx"
+
             const parts = file.replace('.docx', '').split(' - ');
             if (parts.length >= 2) {
                 const id = parseInt(parts[0]);
                 if (!isNaN(id)) {
                     if (id > maxId) maxId = id;
-                    const stats = fs.statSync(path.join(OUTPUT_DIR, file));
+
+                    // Stat assíncrono para pegar a data de criação
+                    const stats = await fs.promises.stat(path.join(OUTPUT_DIR, file));
+
                     recovered.push({
                         os: id,
                         data: stats.birthtime.toLocaleDateString('pt-BR'),
                         cliente: parts[1] || "Desconhecido",
                         impressora: parts[2] || "Geral",
                         status: parts[3] || "Em Análise",
-                        valor: "R$ 0,00", // Valor infelizmente não fica no nome do arquivo
+                        valor: "R$ 0,00",
                         telefone: "",
                         orcamento: "Recuperado de Arquivo",
                         obs: "Sincronizado automaticamente"
@@ -173,7 +190,7 @@ ipcMain.handle('scan-files', async () => {
 ipcMain.handle('open-folder', async (event, type) => {
     const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
     // Garante que a pasta existe antes de abrir
-    if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+    if (!fs.existsSync(target)) await fs.promises.mkdir(target, { recursive: true });
     await shell.openPath(target);
 });
 
@@ -182,7 +199,9 @@ ipcMain.handle('open-os-file', async (event, osId) => {
     try {
         if (!fs.existsSync(OUTPUT_DIR)) return { success: false, error: 'Pasta vazia' };
 
-        const files = fs.readdirSync(OUTPUT_DIR);
+        // Leitura assíncrona do diretório
+        const files = await fs.promises.readdir(OUTPUT_DIR);
+
         // Procura qualquer arquivo que comece com "ID - "
         const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
 

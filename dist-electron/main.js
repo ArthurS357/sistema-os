@@ -21,8 +21,8 @@ const DB_PATH = path_1.default.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path_1.default.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path_1.default.join(BASE_PATH, 'Backups');
 // 2. Onde está o modelo do Word?
-// Em Dev: na raiz do projeto.
-// Em Prod: dentro da pasta de recursos internos do Electron (process.resourcesPath).
+// Em Dev: na raiz do projeto (subindo um nível de dist-electron).
+// Em Prod: dentro da pasta de recursos internos do Electron (resources).
 const MODELO_PATH = electron_is_dev_1.default
     ? path_1.default.join(__dirname, '../modelo_os.docx')
     : path_1.default.join(process.resourcesPath, 'modelo_os.docx');
