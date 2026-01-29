@@ -7,10 +7,26 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependências
 node_modules
+
+# Builds e Distribuição (Frontend e Electron)
 dist
 dist-ssr
+dist-electron
+release
+
+# Arquivos de Ambiente Local
 *.local
+.env
+.env.local
+
+# Dados do Sistema (Não subir para o Git)
+Backups
+OS_Geradas
+
+# Opcional: Ignorar o banco de dados real para evitar conflitos
+# banco_dados.json
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +38,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+thumbs.db
