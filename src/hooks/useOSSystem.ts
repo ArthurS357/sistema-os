@@ -58,7 +58,7 @@ export const useOSSystem = () => {
         return parts.join(' - ');
     };
 
-    // --- Ações Públicas (Expostas para a UI) ---
+    // --- Ações Públicas ---
     const handleClear = () => {
         setEditingId(null);
         setForm(INITIAL_FORM_STATE);
@@ -78,18 +78,24 @@ export const useOSSystem = () => {
         });
     };
 
-    // --- SALVAMENTO (Salva Banco + Gera Word) ---
+    // --- SALVAMENTO CORRIGIDO (ATUALIZAÇÃO INSTANTÂNEA) ---
     const handleSave = async (print: boolean) => {
         if (!form.cliente) return toast.warning('Preencha o nome do Cliente.');
 
         const obsFinal = buildObsString();
         const dataHoje = new Date().toLocaleDateString('pt-BR');
-        let newDb = { ...db };
+
         let currentId = editingId;
 
-        // 1. Atualiza o Estado (Memória)
+        // CRUCIAL: Criamos uma cópia do array para o React detectar a mudança
+        let newHistory = [...db.historico];
+        let newUltimoNumero = db.ultimo_numero;
+
         if (editingId === null) {
+            // --- CRIAÇÃO ---
             currentId = db.ultimo_numero + 1;
+            newUltimoNumero = currentId;
+
             const novaOS: OSHistoryItem = {
                 os: currentId,
                 data: dataHoje,
@@ -101,21 +107,37 @@ export const useOSSystem = () => {
                 obs: obsFinal,
                 status: form.status
             };
-            newDb.historico.push(novaOS);
-            newDb.ultimo_numero = currentId;
+            // Adiciona na cópia do array
+            newHistory.push(novaOS);
         } else {
-            newDb.historico = newDb.historico.map(item =>
+            // --- EDIÇÃO ---
+            newHistory = newHistory.map(item =>
                 item.os === editingId
-                    ? { ...item, cliente: form.cliente, telefone: form.telefone, impressora: form.impressora, orcamento: form.orcamento, valor: form.valor, obs: obsFinal, status: form.status }
+                    ? {
+                        ...item,
+                        cliente: form.cliente,
+                        telefone: form.telefone,
+                        impressora: form.impressora,
+                        orcamento: form.orcamento,
+                        valor: form.valor,
+                        obs: obsFinal,
+                        status: form.status
+                    }
                     : item
             );
         }
 
-        // 2. Salva o Banco de Dados (JSON)
+        // Monta o novo objeto de banco completo
+        const newDb: Database = {
+            ultimo_numero: newUltimoNumero,
+            historico: newHistory
+        };
+
+        // 1. Atualiza Banco e Tela (Instantâneo)
         await saveToDisk(newDb);
         handleClear();
 
-        // 3. Gera o Arquivo Word (Backup Físico)
+        // 2. Gera Arquivo Word em Background
         try {
             const docResult = await window.api.generateDocx({
                 os: currentId!,
@@ -132,42 +154,44 @@ export const useOSSystem = () => {
             if (docResult.success) {
                 if (!print) toast.success(`O.S. ${currentId} salva e gerada!`);
             } else {
-                toast.error(`Salvo no banco, mas erro no Word: ${docResult.error}`);
+                toast.error(`Salvo, mas erro no Word: ${docResult.error}`);
             }
         } catch (e) {
             console.error(e);
         }
 
-        // 4. Imprime se solicitado
+        // 3. Imprime se necessário
         if (print) {
             window.print();
         }
     };
 
-    // --- DELETAR OTIMIZADO (Atualiza Tela Primeiro -> Depois Arquivo) ---
+    // --- DELETAR OTIMIZADO ---
     const handleDelete = async () => {
         if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?\nIsso excluirá também o arquivo Word.`)) return;
 
         const idToDelete = editingId;
         const toastId = toast.loading("Excluindo...");
 
-        // 1. Atualiza Banco e UI Primeiro (Instantâneo)
+        // 1. Atualiza Tela Primeiro (Filter cria novo array, então o React atualiza)
         const newHistory = db.historico.filter(item => item.os !== idToDelete);
-        const maxId = newHistory.length > 0 ? Math.max(...newHistory.map(i => i.os)) : 3825;
-        const newDb = { ultimo_numero: maxId, historico: newHistory };
 
-        await saveToDisk(newDb); // O React atualiza a tela aqui
+        // Recalcula ultimo numero se quiser (opcional) ou mantem o atual
+        // Para evitar conflito de IDs, geralmente mantemos o ultimo_numero crescendo
+        const newDb = { ...db, historico: newHistory };
+
+        await saveToDisk(newDb);
         handleClear();
 
-        // 2. Apaga Arquivo Físico (Sem travar a tela)
+        // 2. Apaga Arquivo Físico em Background
         try {
             await window.api.deleteOsFile(idToDelete);
             toast.dismiss(toastId);
-            toast.success("Registro e arquivo excluídos!");
+            toast.success("Registro apagado!");
         } catch (e) {
             console.error(e);
             toast.dismiss(toastId);
-            toast.warning("Registro apagado, mas erro ao apagar arquivo físico.");
+            toast.warning("Registro apagado do sistema, mas erro no arquivo.");
         }
     };
 
