@@ -1,0 +1,16 @@
+{
+    "ultimo_numero": 3826,
+    "historico": [
+        {
+            "os": 3826,
+            "data": "29/01/2026",
+            "cliente": "asd",
+            "telefone": "11996388698",
+            "impressora": "epson",
+            "orcamento": "Em andamento",
+            "valor": "1899",
+            "obs": "[LIGANDO] - Cliente levou os cabos",
+            "status": "Em Análise"
+        }
+    ]
+}
