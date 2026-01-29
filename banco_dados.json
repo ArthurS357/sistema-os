@@ -1,16 +1,16 @@
 {
+    "ultimo_numero": 3826,
     "historico": [
         {
             "os": 3826,
             "data": "29/01/2026",
-            "cliente": "arthur",
-            "telefone": "(11) 99638-8698",
-            "impressora": "epson",
+            "cliente": "asd",
+            "telefone": "(13) 12312-3123",
+            "impressora": "asdasd",
             "orcamento": "Em andamento",
-            "valor": "R$ 233,33",
-            "obs": "[LIGANDO] - Deixou: Cabo Força - aaaa",
+            "valor": "R$ 1.231,23",
+            "obs": "[LIGANDO] - Deixou: Cartuchos Ass. - asd",
             "status": "Em Análise"
         }
-    ],
-    "ultimo_numero": 3826
+    ]
 }

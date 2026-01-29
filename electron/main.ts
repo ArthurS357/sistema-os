@@ -33,6 +33,7 @@ function performBackup() {
     try {
         if (fs.existsSync(DB_PATH)) {
             const now = new Date();
+            // Formato: backup_YYYY-MM-DD_HH-mm.json
             const timestamp = now.toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
             const backupName = `backup_${timestamp}.json`;
             const backupPath = path.join(BACKUP_DIR, backupName);
@@ -100,7 +101,7 @@ ipcMain.handle('db-save', async (event, data) => {
     } catch (error) { return { success: false, error: String(error) }; }
 });
 
-// 3. Gerar Arquivo Word (.docx) (COM CORREÇÃO DE ERRO MULTI ERROR)
+// 3. Gerar Arquivo Word (.docx) (COM CORREÇÃO DE ERRO PARA EVITAR TRAVAMENTO)
 ipcMain.handle('generate-docx', async (event, data) => {
     try {
         if (!fs.existsSync(MODELO_PATH)) {
@@ -111,7 +112,6 @@ ipcMain.handle('generate-docx', async (event, data) => {
         const content = await fs.promises.readFile(MODELO_PATH, 'binary');
         const zip = new PizZip(content);
 
-        // Configuração para lidar melhor com loops e quebras de linha
         const doc = new Docxtemplater(zip, {
             paragraphLoop: true,
             linebreaks: true
@@ -171,7 +171,6 @@ ipcMain.handle('scan-files', async () => {
                     if (id > maxId) maxId = id;
 
                     const stats = await fs.promises.stat(path.join(OUTPUT_DIR, file));
-
                     let valorRecuperado = "R$ 0,00";
                     let telefoneRecuperado = "";
 
@@ -212,8 +211,25 @@ ipcMain.handle('scan-files', async () => {
     } catch (error) { return { success: false, error: String(error) }; }
 });
 
-// --- COMANDOS DE ARQUIVO/PASTA ---
+// 5. Deletar Arquivo Word
+ipcMain.handle('delete-os-file', async (event, osId) => {
+    try {
+        if (!fs.existsSync(OUTPUT_DIR)) return { success: true };
 
+        const files = await fs.promises.readdir(OUTPUT_DIR);
+        const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
+
+        if (file) {
+            await fs.promises.unlink(path.join(OUTPUT_DIR, file));
+        }
+        return { success: true };
+    } catch (error) {
+        console.error("Erro ao apagar arquivo:", error);
+        return { success: false, error: String(error) };
+    }
+});
+
+// --- COMANDOS DE ARQUIVO/PASTA ---
 ipcMain.handle('open-folder', async (event, type) => {
     const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
     if (!fs.existsSync(target)) await fs.promises.mkdir(target, { recursive: true });
@@ -232,27 +248,6 @@ ipcMain.handle('open-os-file', async (event, osId) => {
             return { success: false, error: 'Arquivo não encontrado.' };
         }
     } catch (e) { return { success: false, error: String(e) }; }
-});
-
-// 5. Deletar Arquivo Word (NOVO)
-ipcMain.handle('delete-os-file', async (event, osId) => {
-    try {
-        if (!fs.existsSync(OUTPUT_DIR)) return { success: true }; // Se pasta não existe, ok
-
-        const files = await fs.promises.readdir(OUTPUT_DIR);
-        // Procura arquivo que comece com "ID -" (Ex: "3850 - Cliente...")
-        const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
-
-        if (file) {
-            await fs.promises.unlink(path.join(OUTPUT_DIR, file));
-            return { success: true };
-        }
-        // Se não achou o arquivo, retorna sucesso também (já não existe)
-        return { success: true };
-    } catch (error) {
-        console.error("Erro ao apagar arquivo:", error);
-        return { success: false, error: String(error) };
-    }
 });
 
 app.whenReady().then(createWindow);
