@@ -9,6 +9,7 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     saveDatabase: (data) => electron_1.ipcRenderer.invoke('db-save', data),
     // 2. Manipulação de Arquivos
     generateDocx: (data) => electron_1.ipcRenderer.invoke('generate-docx', data),
+    deleteOsFile: (osId) => electron_1.ipcRenderer.invoke('delete-os-file', osId),
     scanFiles: () => electron_1.ipcRenderer.invoke('scan-files'),
     // 3. Sistema / Pastas
     openFolder: (type) => electron_1.ipcRenderer.invoke('open-folder', type),

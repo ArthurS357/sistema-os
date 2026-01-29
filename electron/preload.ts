@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 2. Manipulação de Arquivos
   generateDocx: (data: any) => ipcRenderer.invoke('generate-docx', data),
+  deleteOsFile: (osId: number) => ipcRenderer.invoke('delete-os-file', osId),
 
   scanFiles: () => ipcRenderer.invoke('scan-files'),
 

@@ -225,6 +225,26 @@ electron_1.ipcMain.handle('open-os-file', async (event, osId) => {
         return { success: false, error: String(e) };
     }
 });
+// 5. Deletar Arquivo Word (NOVO)
+electron_1.ipcMain.handle('delete-os-file', async (event, osId) => {
+    try {
+        if (!fs_1.default.existsSync(OUTPUT_DIR))
+            return { success: true }; // Se pasta não existe, ok
+        const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
+        // Procura arquivo que comece com "ID -" (Ex: "3850 - Cliente...")
+        const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
+        if (file) {
+            await fs_1.default.promises.unlink(path_1.default.join(OUTPUT_DIR, file));
+            return { success: true };
+        }
+        // Se não achou o arquivo, retorna sucesso também (já não existe)
+        return { success: true };
+    }
+    catch (error) {
+        console.error("Erro ao apagar arquivo:", error);
+        return { success: false, error: String(error) };
+    }
+});
 electron_1.app.whenReady().then(createWindow);
 electron_1.app.on('window-all-closed', () => { if (process.platform !== 'darwin')
     electron_1.app.quit(); });

@@ -54,6 +54,7 @@ export interface ElectronAPI {
     saveDatabase: (data: Database) => Promise<ActionResult>;
     generateDocx: (data: OSHistoryItem) => Promise<DocxResult>;
     scanFiles: () => Promise<ScanResult>;
+    deleteOsFile: (osId: number) => Promise<ActionResult>;
     openFolder: (type: 'os' | 'backup') => Promise<void>;
     openOsFile: (osId: number) => Promise<ActionResult>;
 }

@@ -144,15 +144,28 @@ export const useOSSystem = () => {
         }
     };
 
+    // --- DELETAR (BANCO + ARQUIVO) ---
     const handleDelete = async () => {
-        if (!editingId || !confirm(`Apagar O.S. ${editingId}?`)) return;
+        if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?\nIsso excluirá também o arquivo Word.`)) return;
 
+        const toastId = toast.loading("Apagando registros...");
+
+        // 1. Tenta apagar o arquivo físico
+        try {
+            await window.api.deleteOsFile(editingId);
+        } catch (e) {
+            console.error("Erro ao apagar arquivo físico (pode já não existir).", e);
+        }
+
+        // 2. Apaga do Banco de Dados
         const newHistory = db.historico.filter(item => item.os !== editingId);
         const maxId = newHistory.length > 0 ? Math.max(...newHistory.map(i => i.os)) : 3825;
 
         await saveToDisk({ historico: newHistory, ultimo_numero: maxId });
+
+        toast.dismiss(toastId);
         handleClear();
-        toast.info("O.S. removida.");
+        toast.success("O.S. e Arquivo excluídos com sucesso!");
     };
 
     const handleSyncFiles = async () => {
