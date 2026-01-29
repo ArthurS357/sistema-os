@@ -1,1 +1,27 @@
 @import "tailwindcss";
+
+@layer base {
+    body {
+        @apply antialiased text-slate-800;
+    }
+}
+
+/* --- Configurações de Impressão --- */
+@media print {
+    @page {
+        margin: 0;
+        /* Remove margens padrão do navegador */
+        size: auto;
+    }
+
+    body {
+        -webkit-print-color-adjust: exact;
+        /* Força impressão de cores/backgrounds */
+        print-color-adjust: exact;
+    }
+
+    /* Esconde scrollbars na impressão */
+    ::-webkit-scrollbar {
+        display: none;
+    }
+}
