@@ -44,8 +44,8 @@ const App: React.FC = () => {
     <button
       onClick={() => filter.set(value)}
       className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${active
-          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-          : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+        : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
         }`}
     >
       {label}
@@ -157,6 +157,7 @@ const App: React.FC = () => {
             onEdit={actions.edit}
             onSync={actions.sync}
             onOpenFolder={actions.openFolder}
+            onExport={actions.exportData} // <--- CONECTANDO AQUI
           />
         </div>
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import type { Database, OSHistoryItem, OSFormState } from '../types';
+import { exportToCSV } from '../utils/exporter'; // Importar utilitário de exportação
 
 // Definindo o tipo para os filtros de status
 export type FilterStatus = 'all' | 'active' | 'finished';
@@ -26,7 +27,7 @@ export const useOSSystem = () => {
 
     // --- ESTADOS DE NAVEGAÇÃO E FILTROS ---
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState<FilterStatus>('all'); // Novo estado de filtro
+    const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 50;
 
@@ -59,7 +60,7 @@ export const useOSSystem = () => {
 
     // --- HELPERS INTERNOS ---
     const saveToDisk = async (newDb: Database) => {
-        setDb(newDb); // Atualização Otimista (UI primeiro)
+        setDb(newDb); // Atualização Otimista
         const result = await window.api.saveDatabase(newDb);
         if (!result.success) {
             toast.error(`Falha ao salvar no disco: ${result.error}`);
@@ -83,9 +84,9 @@ export const useOSSystem = () => {
         return parts.join(' - ');
     };
 
-    // --- LÓGICA DE FILTRAGEM E PAGINAÇÃO (OTIMIZADA) ---
+    // --- LÓGICA DE FILTRAGEM E PAGINAÇÃO ---
 
-    // 1. Mantém lista sempre ordenada (só recria se o banco mudar)
+    // 1. Mantém lista sempre ordenada
     const sortedHistory = useMemo(() => {
         return [...db.historico].sort((a, b) => b.os - a.os);
     }, [db.historico]);
@@ -96,10 +97,8 @@ export const useOSSystem = () => {
 
         // Filtro por Status (Abas)
         if (filterStatus === 'active') {
-            // Mostra tudo que NÃO contém "Entregue" (ou seja, pendentes)
             data = data.filter(item => !item.status.toLowerCase().includes('entregue'));
         } else if (filterStatus === 'finished') {
-            // Mostra APENAS o que contém "Entregue"
             data = data.filter(item => item.status.toLowerCase().includes('entregue'));
         }
 
@@ -152,14 +151,12 @@ export const useOSSystem = () => {
         const dataHoje = new Date().toLocaleDateString('pt-BR');
 
         let currentId = editingId;
-        // Cria cópia segura do histórico
         let newHistory = [...db.historico];
         let newUltimoNumero = db.ultimo_numero;
 
-        // Objeto da OS
         const osDataToSave: OSHistoryItem = {
-            os: 0, // Será definido abaixo
-            data: dataHoje, // Default, será mantida se for edição
+            os: 0,
+            data: dataHoje,
             cliente: form.cliente,
             telefone: form.telefone,
             impressora: form.impressora,
@@ -170,36 +167,27 @@ export const useOSSystem = () => {
         };
 
         if (editingId === null) {
-            // Nova OS
             currentId = db.ultimo_numero + 1;
             newUltimoNumero = currentId;
             osDataToSave.os = currentId;
             newHistory.push(osDataToSave);
         } else {
-            // Edição
             currentId = editingId;
             newHistory = newHistory.map(item => {
                 if (item.os === editingId) {
-                    // Mantém a data original na edição
                     return { ...osDataToSave, os: editingId, data: item.data };
                 }
                 return item;
             });
         }
 
-        // Salva no JSON
         await saveToDisk({ ultimo_numero: newUltimoNumero, historico: newHistory });
         handleClear();
 
-        // Gera Word
         try {
             const docResult = await window.api.generateDocx({
                 ...osDataToSave,
                 os: currentId!,
-                // Se for edição, precisamos garantir que enviamos a data correta para o Word também, 
-                // mas para simplificar aqui usamos 'dataHoje' ou recuperamos do histórico se preferir.
-                // Neste caso, para impressão, geralmente usa-se a data atual ou a de criação. 
-                // Vamos manter dataHoje para garantir que o documento saia com a data do documento gerado.
             });
 
             if (docResult.success && !print) toast.success(`O.S. ${currentId} salva!`);
@@ -225,14 +213,18 @@ export const useOSSystem = () => {
     const handleSyncFiles = async () => {
         if (!confirm("Isso vai ler a pasta 'OS_Geradas' e recuperar O.S. perdidas.\nDeseja continuar?")) return;
 
-        const toastId = toast.loading("Escaneando arquivos...");
+        const toastId = toast.loading("Escaneando arquivos... Isso pode demorar.");
         try {
             const result = await window.api.scanFiles();
 
             if (result.success && result.data) {
+                // Mescla inteligente: mantém o que já está no banco se não houver conflito
+                // Mas aqui, como o Scan agora é profundo, confiamos nos dados do Scan se forem novos
                 const currentIds = new Set(db.historico.map(i => i.os));
-                // Filtra apenas o que não temos no banco
                 const newItems = result.data.historico.filter((i: OSHistoryItem) => !currentIds.has(i.os));
+
+                // Opcional: Atualizar registros existentes se o scan tiver dados melhores? 
+                // Por segurança, vamos apenas ADICIONAR os faltantes.
 
                 if (newItems.length === 0) {
                     toast.dismiss(toastId);
@@ -256,14 +248,39 @@ export const useOSSystem = () => {
         }
     };
 
-    // Abre pastas nativas
     const handleOpenFolder = (type: 'os' | 'backup') => window.api.openFolder(type);
 
-    // Abre arquivo Word
     const handleOpenWord = async () => {
         if (!editingId) return;
         const result = await window.api.openOsFile(editingId);
         if (!result.success) toast.error("Arquivo não encontrado.");
+    };
+
+    // --- NOVA FUNÇÃO DE EXPORTAÇÃO ---
+    const handleExport = () => {
+        // Recriamos a lógica de filtro para exportar TUDO (sem paginação)
+        let dataToExport = [...db.historico].sort((a, b) => b.os - a.os);
+
+        if (filterStatus === 'active') {
+            dataToExport = dataToExport.filter(item => !item.status.toLowerCase().includes('entregue'));
+        } else if (filterStatus === 'finished') {
+            dataToExport = dataToExport.filter(item => item.status.toLowerCase().includes('entregue'));
+        }
+
+        if (searchTerm) {
+            const lowerBusca = searchTerm.toLowerCase();
+            dataToExport = dataToExport.filter(item =>
+                item.cliente.toLowerCase().includes(lowerBusca) ||
+                item.os.toString().includes(lowerBusca) ||
+                (item.impressora && item.impressora.toLowerCase().includes(lowerBusca))
+            );
+        }
+
+        const timestamp = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+        const nomeArquivo = `Relatorio_${filterStatus}_${timestamp}.csv`;
+
+        exportToCSV(dataToExport, nomeArquivo);
+        toast.success(`Relatório gerado: ${dataToExport.length} registros.`);
     };
 
     return {
@@ -271,29 +288,19 @@ export const useOSSystem = () => {
         db,
         displayItems: filteredAndPaginatedData.items,
 
-        // Controles de Visualização
+        // Controles
         pagination: {
             currentPage,
             setCurrentPage,
             totalPages: filteredAndPaginatedData.totalPages,
             totalItems: filteredAndPaginatedData.totalItems
         },
-        search: {
-            value: searchTerm,
-            onChange: setSearchTerm
-        },
-        filter: {
-            value: filterStatus,
-            set: setFilterStatus
-        },
+        search: { value: searchTerm, onChange: setSearchTerm },
+        filter: { value: filterStatus, set: setFilterStatus },
 
-        // Formulário e Estado
-        form,
-        setForm,
-        editingId,
-        loading,
-        error,
-        retry: loadData,
+        // Form e Estado
+        form, setForm, editingId,
+        loading, error, retry: loadData,
 
         // Ações
         actions: {
@@ -303,7 +310,8 @@ export const useOSSystem = () => {
             clear: handleClear,
             sync: handleSyncFiles,
             openFolder: handleOpenFolder,
-            openWord: handleOpenWord
+            openWord: handleOpenWord,
+            exportData: handleExport // <--- Exportando a nova ação
         }
     };
 };
