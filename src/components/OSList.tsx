@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit, FolderOpen, RefreshCw, Trash2, Download } from 'lucide-react'; // Importar Download
+import { Edit, FolderOpen, RefreshCw, Download, FileText } from 'lucide-react'; // Adicionado FileText
 import type { OSHistoryItem } from '../types';
 
 interface OSListProps {
@@ -8,11 +8,12 @@ interface OSListProps {
     onEdit: (os: OSHistoryItem) => void;
     onSync: () => void;
     onOpenFolder: (type: 'os' | 'backup') => void;
-    onExport: () => void; // <--- NOVA PROP
+    onExport: () => void;
+    onOpenWord: (id?: number) => void; // <--- Atualizado para aceitar ID opcional
 }
 
 export const OSList: React.FC<OSListProps> = ({
-    historico, editingId, onEdit, onSync, onOpenFolder, onExport
+    historico, editingId, onEdit, onSync, onOpenFolder, onExport, onOpenWord
 }) => {
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full overflow-hidden">
@@ -56,7 +57,7 @@ export const OSList: React.FC<OSListProps> = ({
                             <th className="p-4 border-b border-slate-100">Equipamento</th>
                             <th className="p-4 border-b border-slate-100">Valor</th>
                             <th className="p-4 border-b border-slate-100">Status</th>
-                            <th className="p-4 border-b border-slate-100 w-10"></th>
+                            <th className="p-4 border-b border-slate-100 w-24"></th> {/* Largura ajustada */}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50 text-sm">
@@ -78,10 +79,23 @@ export const OSList: React.FC<OSListProps> = ({
                                         {item.status}
                                     </span>
                                 </td>
-                                <td className="p-4 text-right">
+                                <td className="p-4 text-right flex justify-end gap-1">
+                                    {/* Botão Abrir Word Rápido */}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation(); // Evita ativar a linha (edição)
+                                            onOpenWord(item.os);
+                                        }}
+                                        className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        title="Abrir Arquivo Word"
+                                    >
+                                        <FileText size={16} />
+                                    </button>
+
                                     <button
                                         onClick={() => onEdit(item)}
                                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        title="Editar Registro"
                                     >
                                         <Edit size={16} />
                                     </button>

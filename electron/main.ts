@@ -8,7 +8,7 @@ import { WordService } from './services/WordService';
 import { DatabaseService } from './services/DatabaseService';
 import { ScanService } from './services/ScanService';
 
-// --- CONFIGURAÇÃO ---
+// --- CONFIGURAÇÃO DE AMBIENTE ---
 const isDev = !app.isPackaged;
 const BASE_PATH = isDev
     ? path.join(__dirname, '..')
@@ -30,10 +30,13 @@ const scanService = new ScanService(OUTPUT_DIR);
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
+    // Executa backup automático ao iniciar
     backupService.performBackup();
 
     mainWindow = new BrowserWindow({
-        width: 1280, height: 800, title: "Cap.Com System",
+        width: 1280,
+        height: 800,
+        title: "Cap.Com System",
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -50,7 +53,7 @@ function createWindow(): void {
     mainWindow.loadURL(startURL);
 }
 
-// --- API HANDLERS ---
+// --- API HANDLERS (COMUNICAÇÃO FRONTEND <-> BACKEND) ---
 
 // 1. Banco de Dados
 ipcMain.handle('db-load', () => dbService.load());
@@ -62,12 +65,21 @@ ipcMain.handle('generate-docx', (_, data) => wordService.generate(data));
 // 3. Sistema de Arquivos (Scan e Gestão)
 ipcMain.handle('scan-files', () => scanService.scanFiles());
 
+// NOVA ROTA: Sincronizar Arquivo Único (Manual)
+ipcMain.handle('scan-single', async (_, osId) => {
+    if (typeof osId !== 'number') return { success: false, error: "ID inválido" };
+    // Chama a função otimizada para ler apenas um arquivo específico
+    return await scanService.syncSingleFile(osId);
+});
+
+// 4. Operações de Arquivo
 ipcMain.handle('delete-os-file', async (_, osId) => {
     if (typeof osId !== 'number') return { success: false, error: "ID inválido" };
     try {
         if (!fs.existsSync(OUTPUT_DIR)) return { success: true };
         const files = await fs.promises.readdir(OUTPUT_DIR);
-        // Regex para garantir que deletamos o arquivo certo (ID no início)
+
+        // Regex para garantir que deletamos o arquivo certo
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
 
@@ -86,8 +98,10 @@ ipcMain.handle('open-os-file', async (_, osId) => {
     if (typeof osId !== 'number') return { success: false, error: "ID inválido" };
     try {
         const files = await fs.promises.readdir(OUTPUT_DIR);
+        // Regex para encontrar o arquivo para abrir
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
+
         if (file) {
             await shell.openPath(path.join(OUTPUT_DIR, file));
             return { success: true };

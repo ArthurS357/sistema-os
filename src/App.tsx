@@ -8,7 +8,6 @@ import { OSForm } from './components/OSForm';
 import { OSList } from './components/OSList';
 
 // Hooks
-// CORREÇÃO AQUI: Adicionado 'type' antes de FilterStatus
 import { useOSSystem, type FilterStatus } from './hooks/useOSSystem';
 import { useShortcuts } from './hooks/useShortcuts';
 
@@ -44,8 +43,8 @@ const App: React.FC = () => {
     <button
       onClick={() => filter.set(value)}
       className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${active
-        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-        : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+          : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
         }`}
     >
       {label}
@@ -102,13 +101,14 @@ const App: React.FC = () => {
         onSave={actions.save}
         onClear={actions.clear}
         onDelete={actions.delete}
-        onOpenWord={actions.openWord}
+        onOpenWord={() => actions.openWord()} // Abrir o Word do arquivo em edição (se houver)
+        onSyncSingle={actions.syncSingle}     // Nova prop para o botão "Refresh"
       />
 
       {/* Área Direita (Dashboard + Lista) */}
       <div className="flex-1 flex flex-col gap-4 h-full overflow-hidden">
 
-        {/* Stats (Conectado com Filtro) */}
+        {/* Stats */}
         <DashboardStats
           historico={db.historico}
           onOpenPending={() => filter.set('active')}
@@ -117,7 +117,7 @@ const App: React.FC = () => {
         {/* --- ÁREA DE FILTROS E BUSCA --- */}
         <div className="flex flex-col gap-2 shrink-0">
 
-          {/* Abas de Navegação (Tabs) */}
+          {/* Abas de Navegação */}
           <div className="flex gap-2">
             <FilterTab label="Todas" value="all" active={filter.value === 'all'} />
             <FilterTab label="Na Bancada" value="active" active={filter.value === 'active'} />
@@ -157,7 +157,20 @@ const App: React.FC = () => {
             onEdit={actions.edit}
             onSync={actions.sync}
             onOpenFolder={actions.openFolder}
-            onExport={actions.exportData} // <--- CONECTANDO AQUI
+            onExport={actions.exportData}
+
+            // CORREÇÃO: Passando a função para abrir o Word pelo ID
+            // Se o ID for passado (clique na lista), usa ele. Se não (undefined), o backend ignora.
+            // Para abrir Word da lista, precisamos que `actions.openWord` aceite um argumento opcional no hook
+            // ou criar uma nova action `actions.openWordById`. 
+            // Como `actions.openWord` no hook usa `editingId`, vamos adaptar aqui:
+
+            onOpenWord={(id) => {
+              // Se receber um ID (clique na lista), chama a API direto
+              if (id) window.api.openOsFile(id);
+              // Se não (clique no form sem ID), usa a action padrão que pega o editingId
+              else actions.openWord();
+            }}
           />
         </div>
 
