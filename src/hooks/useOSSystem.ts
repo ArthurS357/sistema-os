@@ -64,10 +64,20 @@ export const useOSSystem = () => {
         return parts.join(' - ');
     };
 
-    // --- LÓGICA DE FILTRO E PAGINAÇÃO (OTIMIZAÇÃO) ---
+    // --- LÓGICA DE PERFORMANCE (OTIMIZAÇÃO 1) ---
+
+    // Passo 1: Mantemos uma versão SEMPRE ordenada do histórico.
+    // Isso só roda quando 'db.historico' muda (ex: salvar/deletar), e não a cada digitação.
+    const sortedHistory = useMemo(() => {
+        return [...db.historico].sort((a, b) => b.os - a.os);
+    }, [db.historico]);
+
+    // Passo 2: Filtramos e paginamos baseados na lista já ordenada.
+    // A busca agora é muito mais leve pois não precisa reordenar nada.
     const filteredAndPaginatedData = useMemo(() => {
-        // 1. Filtragem
-        let data = db.historico;
+        let data = sortedHistory;
+
+        // Filtragem
         if (searchTerm) {
             const lowerBusca = searchTerm.toLowerCase();
             data = data.filter(item =>
@@ -77,22 +87,18 @@ export const useOSSystem = () => {
             );
         }
 
-        // 2. Ordenação (Sempre do mais novo para o mais antigo)
-        // Cria uma cópia para não mutar o estado original
-        const sortedData = [...data].sort((a, b) => b.os - a.os);
-
-        // 3. Paginação
-        const totalItems = sortedData.length;
+        // Paginação
+        const totalItems = data.length;
         const totalPages = Math.ceil(totalItems / itemsPerPage);
         const startIndex = (currentPage - 1) * itemsPerPage;
-        const paginatedItems = sortedData.slice(startIndex, startIndex + itemsPerPage);
+        const paginatedItems = data.slice(startIndex, startIndex + itemsPerPage);
 
         return {
             items: paginatedItems,
             totalPages,
             totalItems
         };
-    }, [db.historico, searchTerm, currentPage]);
+    }, [sortedHistory, searchTerm, currentPage]); // Removemos 'db.historico' daqui
 
     // Reseta para página 1 se a busca mudar
     useEffect(() => {
@@ -272,12 +278,9 @@ export const useOSSystem = () => {
     };
 
     return {
-        db, // Banco original (útil para estatísticas globais)
-
-        // Use ISTO na sua Lista para ter filtro e paginação:
+        db,
         displayItems: filteredAndPaginatedData.items,
 
-        // Controles de paginação e busca
         pagination: {
             currentPage,
             setCurrentPage,
