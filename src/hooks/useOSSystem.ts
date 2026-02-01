@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import type { Database, OSHistoryItem, OSFormState } from '../types';
 
@@ -14,37 +14,53 @@ const INITIAL_FORM_STATE: OSFormState = {
 };
 
 export const useOSSystem = () => {
-    // --- ESTADOS PRINCIPAIS ---
+    // --- ESTADOS ---
     const [db, setDb] = useState<Database>({ ultimo_numero: 3825, historico: [] });
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null); // Novo estado de erro
     const [form, setForm] = useState<OSFormState>(INITIAL_FORM_STATE);
     const [editingId, setEditingId] = useState<number | null>(null);
 
-    // --- ESTADOS DE OTIMIZAÇÃO (Busca e Paginação) ---
+    // --- ESTADOS DE OTIMIZAÇÃO ---
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 50; // Quantidade de itens por página
+    const itemsPerPage = 50;
 
-    // --- Inicialização ---
-    useEffect(() => {
-        const loadData = async () => {
-            try {
-                const data = await window.api.loadDatabase();
-                if (data) setDb(data);
-            } catch (err) {
-                toast.error("Erro ao carregar banco de dados.");
-            } finally {
-                setLoading(false);
+    // --- CARREGAMENTO INICIAL (Blindado) ---
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            console.log("Tentando carregar banco de dados...");
+            const data = await window.api.loadDatabase();
+
+            // Validação simples para garantir que veio algo válido
+            if (!data || !Array.isArray(data.historico)) {
+                throw new Error("Formato de banco de dados inválido recebido do sistema.");
             }
-        };
-        loadData();
+
+            setDb(data);
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || "Falha desconhecida ao ler banco de dados.");
+            toast.error("Erro crítico ao carregar dados.");
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    // --- Helpers Internos ---
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    // --- Helpers ---
     const saveToDisk = async (newDb: Database) => {
-        setDb(newDb); // Atualiza a tela imediatamente
+        setDb(newDb);
         const result = await window.api.saveDatabase(newDb);
-        if (!result.success) toast.error("Falha ao salvar no disco!");
+        if (!result.success) {
+            toast.error(`Falha ao salvar no disco: ${result.error}`);
+            // Opcional: Reverter estado se falhar (rollback visual)
+        }
     };
 
     const buildObsString = () => {
@@ -64,20 +80,14 @@ export const useOSSystem = () => {
         return parts.join(' - ');
     };
 
-    // --- LÓGICA DE PERFORMANCE (OTIMIZAÇÃO 1) ---
-
-    // Passo 1: Mantemos uma versão SEMPRE ordenada do histórico.
-    // Isso só roda quando 'db.historico' muda (ex: salvar/deletar), e não a cada digitação.
+    // --- OTIMIZAÇÃO DE PERFORMANCE (Sort + Filter) ---
     const sortedHistory = useMemo(() => {
         return [...db.historico].sort((a, b) => b.os - a.os);
     }, [db.historico]);
 
-    // Passo 2: Filtramos e paginamos baseados na lista já ordenada.
-    // A busca agora é muito mais leve pois não precisa reordenar nada.
     const filteredAndPaginatedData = useMemo(() => {
         let data = sortedHistory;
 
-        // Filtragem
         if (searchTerm) {
             const lowerBusca = searchTerm.toLowerCase();
             data = data.filter(item =>
@@ -87,25 +97,17 @@ export const useOSSystem = () => {
             );
         }
 
-        // Paginação
         const totalItems = data.length;
         const totalPages = Math.ceil(totalItems / itemsPerPage);
         const startIndex = (currentPage - 1) * itemsPerPage;
         const paginatedItems = data.slice(startIndex, startIndex + itemsPerPage);
 
-        return {
-            items: paginatedItems,
-            totalPages,
-            totalItems
-        };
-    }, [sortedHistory, searchTerm, currentPage]); // Removemos 'db.historico' daqui
+        return { items: paginatedItems, totalPages, totalItems };
+    }, [sortedHistory, searchTerm, currentPage]);
 
-    // Reseta para página 1 se a busca mudar
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm]);
 
-    // --- Ações Públicas ---
+    // --- AÇÕES ---
     const handleClear = () => {
         setEditingId(null);
         setForm(INITIAL_FORM_STATE);
@@ -125,7 +127,6 @@ export const useOSSystem = () => {
         });
     };
 
-    // --- SALVAMENTO (Imutabilidade + Word) ---
     const handleSave = async (print: boolean) => {
         if (!form.cliente) return toast.warning('Preencha o nome do Cliente.');
 
@@ -133,12 +134,10 @@ export const useOSSystem = () => {
         const dataHoje = new Date().toLocaleDateString('pt-BR');
 
         let currentId = editingId;
-        // CRUCIAL: Criamos uma cópia do array para o React detectar a mudança
         let newHistory = [...db.historico];
         let newUltimoNumero = db.ultimo_numero;
 
         if (editingId === null) {
-            // --- CRIAÇÃO ---
             currentId = db.ultimo_numero + 1;
             newUltimoNumero = currentId;
 
@@ -155,33 +154,16 @@ export const useOSSystem = () => {
             };
             newHistory.push(novaOS);
         } else {
-            // --- EDIÇÃO ---
             newHistory = newHistory.map(item =>
                 item.os === editingId
-                    ? {
-                        ...item,
-                        cliente: form.cliente,
-                        telefone: form.telefone,
-                        impressora: form.impressora,
-                        orcamento: form.orcamento,
-                        valor: form.valor,
-                        obs: obsFinal,
-                        status: form.status
-                    }
+                    ? { ...item, cliente: form.cliente, telefone: form.telefone, impressora: form.impressora, orcamento: form.orcamento, valor: form.valor, obs: obsFinal, status: form.status }
                     : item
             );
         }
 
-        const newDb: Database = {
-            ultimo_numero: newUltimoNumero,
-            historico: newHistory
-        };
-
-        // 1. Atualiza Banco e Tela
-        await saveToDisk(newDb);
+        await saveToDisk({ ultimo_numero: newUltimoNumero, historico: newHistory });
         handleClear();
 
-        // 2. Gera Arquivo Word
         try {
             const docResult = await window.api.generateDocx({
                 os: currentId!,
@@ -194,46 +176,28 @@ export const useOSSystem = () => {
                 status: form.status,
                 obs: obsFinal
             });
-
-            if (docResult.success) {
-                if (!print) toast.success(`O.S. ${currentId} salva e gerada!`);
-            } else {
-                toast.error(`Salvo, mas erro no Word: ${docResult.error}`);
-            }
-        } catch (e) {
-            console.error(e);
-        }
+            if (docResult.success && !print) toast.success(`O.S. ${currentId} salva!`);
+            else if (!docResult.success) toast.error(`Salvo, mas erro no Word: ${docResult.error}`);
+        } catch (e) { console.error(e); }
 
         if (print) window.print();
     };
 
-    // --- DELETAR (Atualiza UI Primeiro) ---
     const handleDelete = async () => {
         if (!editingId || !confirm(`Tem certeza que deseja apagar a O.S. ${editingId}?`)) return;
-
         const idToDelete = editingId;
-        const toastId = toast.loading("Excluindo...");
 
+        // Atualiza UI primeiro
         const newHistory = db.historico.filter(item => item.os !== idToDelete);
-        const newDb = { ...db, historico: newHistory };
-
-        await saveToDisk(newDb);
+        await saveToDisk({ ...db, historico: newHistory });
         handleClear();
 
-        try {
-            await window.api.deleteOsFile(idToDelete);
-            toast.dismiss(toastId);
-            toast.success("Registro apagado!");
-        } catch (e) {
-            console.error(e);
-            toast.dismiss(toastId);
-            toast.warning("Registro apagado, arquivo físico mantido.");
-        }
+        await window.api.deleteOsFile(idToDelete);
+        toast.success("Registro apagado!");
     };
 
     const handleSyncFiles = async () => {
         if (!confirm("Isso vai ler a pasta 'OS_Geradas' e recuperar O.S. perdidas.\nDeseja continuar?")) return;
-
         const toastId = toast.loading("Escaneando arquivos...");
         try {
             const result = await window.api.scanFiles();
@@ -255,7 +219,7 @@ export const useOSSystem = () => {
                 toast.success(`${newItems.length} O.S. recuperadas!`);
             } else {
                 toast.dismiss(toastId);
-                toast.warning("Não foi possível ler a pasta.");
+                toast.warning("Erro ao ler pasta.");
             }
         } catch (e) {
             toast.dismiss(toastId);
@@ -263,47 +227,28 @@ export const useOSSystem = () => {
         }
     };
 
-    const handleOpenFolder = (type: 'os' | 'backup') => {
-        window.api.openFolder(type);
-        toast.success(`Pasta aberta!`);
-    };
+    const handleOpenFolder = (type: 'os' | 'backup') => window.api.openFolder(type);
 
     const handleOpenWord = async () => {
         if (!editingId) return;
-        const toastId = toast.loading("Buscando arquivo...");
         const result = await window.api.openOsFile(editingId);
-        toast.dismiss(toastId);
-        if (result.success) toast.success("Arquivo aberto!");
-        else toast.error("Arquivo não encontrado.");
+        if (!result.success) toast.error("Arquivo não encontrado.");
     };
 
     return {
         db,
         displayItems: filteredAndPaginatedData.items,
-
         pagination: {
             currentPage,
             setCurrentPage,
             totalPages: filteredAndPaginatedData.totalPages,
             totalItems: filteredAndPaginatedData.totalItems
         },
-        search: {
-            value: searchTerm,
-            onChange: setSearchTerm
-        },
-
-        form,
-        setForm,
-        editingId,
+        search: { value: searchTerm, onChange: setSearchTerm },
+        form, setForm, editingId,
         loading,
-        actions: {
-            save: handleSave,
-            edit: handleEdit,
-            delete: handleDelete,
-            clear: handleClear,
-            sync: handleSyncFiles,
-            openFolder: handleOpenFolder,
-            openWord: handleOpenWord
-        }
+        error, // <--- EXPORTANDO ESTADO DE ERRO
+        retry: loadData, // <--- EXPORTANDO FUNÇÃO DE RETRY
+        actions: { save: handleSave, edit: handleEdit, delete: handleDelete, clear: handleClear, sync: handleSyncFiles, openFolder: handleOpenFolder, openWord: handleOpenWord }
     };
 };

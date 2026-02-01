@@ -6,53 +6,30 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const pizzip_1 = __importDefault(require("pizzip"));
-const docxtemplater_1 = __importDefault(require("docxtemplater"));
-// --- CORREÇÃO DO ERRO ESM ---
-// Substituímos a biblioteca 'electron-is-dev' pela checagem nativa do Electron.
-// Se o app NÃO estiver empacotado (!app.isPackaged), estamos em DEV.
+// Serviços
+const BackupService_1 = require("./services/BackupService");
+const WordService_1 = require("./services/WordService");
+const DatabaseService_1 = require("./services/DatabaseService");
+const ScanService_1 = require("./services/ScanService");
+// --- CONFIGURAÇÃO ---
 const isDev = !electron_1.app.isPackaged;
-let mainWindow = null;
-// --- DEFINIÇÃO INTELIGENTE DE CAMINHOS ---
-// Se estiver desenvolvendo (isDev): usa a pasta do projeto.
-// Se for Produção (Executável): usa a pasta onde o .exe está rodando.
 const BASE_PATH = isDev
     ? path_1.default.join(__dirname, '..')
     : (process.env.PORTABLE_EXECUTABLE_DIR || path_1.default.dirname(process.execPath));
 const DB_PATH = path_1.default.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path_1.default.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path_1.default.join(BASE_PATH, 'Backups');
-// Caminho do modelo Word
 const MODELO_PATH = isDev
     ? path_1.default.join(__dirname, '../modelo_os.docx')
     : path_1.default.join(process.resourcesPath, 'modelo_os.docx');
-// Garante que as pastas de saída existam
-[OUTPUT_DIR, BACKUP_DIR].forEach(dir => {
-    if (!fs_1.default.existsSync(dir))
-        fs_1.default.mkdirSync(dir, { recursive: true });
-});
-// --- BACKUP AUTOMÁTICO ---
-function performBackup() {
-    try {
-        if (fs_1.default.existsSync(DB_PATH)) {
-            const now = new Date();
-            const timestamp = now.toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
-            const backupPath = path_1.default.join(BACKUP_DIR, `backup_${timestamp}.json`);
-            fs_1.default.copyFileSync(DB_PATH, backupPath);
-            // Limpeza: Mantém apenas os últimos 50 backups
-            const files = fs_1.default.readdirSync(BACKUP_DIR);
-            if (files.length > 50) {
-                files.sort();
-                files.slice(0, files.length - 50).forEach(f => fs_1.default.unlinkSync(path_1.default.join(BACKUP_DIR, f)));
-            }
-        }
-    }
-    catch (error) {
-        console.error("Erro no Backup:", error);
-    }
-}
+// --- INSTANCIANDO SERVIÇOS ---
+const backupService = new BackupService_1.BackupService(DB_PATH, BACKUP_DIR);
+const wordService = new WordService_1.WordService(MODELO_PATH, OUTPUT_DIR);
+const dbService = new DatabaseService_1.DatabaseService(DB_PATH);
+const scanService = new ScanService_1.ScanService(OUTPUT_DIR);
+let mainWindow = null;
 function createWindow() {
-    performBackup();
+    backupService.performBackup();
     mainWindow = new electron_1.BrowserWindow({
         width: 1280, height: 800, title: "Cap.Com System",
         webPreferences: {
@@ -63,171 +40,27 @@ function createWindow() {
         autoHideMenuBar: true,
         icon: path_1.default.join(__dirname, '../public/favicon.ico')
     });
-    // Configuração da URL de início baseada no ambiente
     const startURL = isDev
         ? 'http://localhost:5173'
         : `file://${path_1.default.join(__dirname, '../dist/index.html')}`;
     mainWindow.loadURL(startURL);
 }
-// --- HANDLERS (PROCESSOS) ---
-// 1. Carregar Banco
-electron_1.ipcMain.handle('db-load', async () => {
-    try {
-        if (fs_1.default.existsSync(DB_PATH)) {
-            const data = await fs_1.default.promises.readFile(DB_PATH, 'utf-8');
-            return JSON.parse(data);
-        }
-    }
-    catch (e) {
-        console.error(e);
-    }
-    return { ultimo_numero: 3825, historico: [] };
-});
-// 2. Salvar Banco (COM ESCRITA ATÔMICA - Mais Seguro)
-electron_1.ipcMain.handle('db-save', async (event, data) => {
-    try {
-        const jsonContent = JSON.stringify(data, null, 4);
-        const tempPath = `${DB_PATH}.tmp`;
-        // 1. Salva em um arquivo temporário primeiro
-        await fs_1.default.promises.writeFile(tempPath, jsonContent, 'utf-8');
-        // 2. Substitui o original instantaneamente (Atomic Rename)
-        await fs_1.default.promises.rename(tempPath, DB_PATH);
-        return { success: true };
-    }
-    catch (e) {
-        return { success: false, error: String(e) };
-    }
-});
-// 3. Gerar DOCX (ANTI-TRAVAMENTO)
-electron_1.ipcMain.handle('generate-docx', async (event, data) => {
-    console.log(`[DOCX] Iniciando geração para OS #${data.os}...`);
-    try {
-        if (!fs_1.default.existsSync(MODELO_PATH))
-            return { success: false, error: "Modelo 'modelo_os.docx' não encontrado." };
-        const content = await fs_1.default.promises.readFile(MODELO_PATH, 'binary');
-        let zip;
-        try {
-            zip = new pizzip_1.default(content);
-        }
-        catch (e) {
-            return { success: false, error: "Arquivo modelo corrompido ou inválido." };
-        }
-        // paragraphLoop: false é essencial para evitar loops infinitos
-        const doc = new docxtemplater_1.default(zip, {
-            paragraphLoop: false,
-            linebreaks: true
-        });
-        const renderData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k.toUpperCase(), String(v || '')]));
-        try {
-            doc.render(renderData);
-        }
-        catch (err) {
-            const errors = err.properties?.errors?.map((e) => e.properties.explanation).join(' | ');
-            console.error("[DOCX] Erro de renderização:", errors || err);
-            return { success: false, error: `Erro nas tags do Word: ${errors || err.message}` };
-        }
-        const safeName = `${data.os} - ${data.cliente} - ${data.impressora} - ${data.status}`.replace(/[<>:"/\\|?*]/g, '-').trim() + ".docx";
-        const filePath = path_1.default.join(OUTPUT_DIR, safeName);
-        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
-        await fs_1.default.promises.writeFile(filePath, buffer);
-        console.log(`[DOCX] Sucesso: ${filePath}`);
-        return { success: true, path: filePath };
-    }
-    catch (e) {
-        console.error("[DOCX] Erro fatal:", e);
-        return { success: false, error: String(e.message || e) };
-    }
-});
-// 4. Scan Inteligente (COM REGEX AVANÇADO)
-electron_1.ipcMain.handle('scan-files', async () => {
-    console.log("[SCAN] Iniciando varredura inteligente...");
-    try {
-        if (!fs_1.default.existsSync(OUTPUT_DIR))
-            return { success: false, count: 0 };
-        const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        const recovered = [];
-        let maxId = 3825;
-        // Regex poderosa para achar IDs no início do arquivo
-        // Aceita: "3500...", "OS 3500...", "O.S. 3500...", "Pedido 3500..."
-        const idRegex = /^(?:O\.?S\.?|Nº?|PEDIDO)?\s*[.\-_]?\s*(\d{3,6})/i;
-        const docxFiles = files.filter(f => f.endsWith('.docx'));
-        // Limita a leitura profunda aos últimos 100 arquivos para não travar
-        const recentFilesLimit = 100;
-        const startIndex = Math.max(0, docxFiles.length - recentFilesLimit);
-        for (let i = 0; i < docxFiles.length; i++) {
-            const file = docxFiles[i];
-            // Tenta extrair o ID com a Regex
-            const match = file.match(idRegex);
-            if (match && match[1]) {
-                const id = parseInt(match[1]);
-                if (!isNaN(id) && id > 0) {
-                    if (id > maxId)
-                        maxId = id;
-                    const stats = await fs_1.default.promises.stat(path_1.default.join(OUTPUT_DIR, file));
-                    // --- Tenta adivinhar Cliente e Máquina pelo nome do arquivo ---
-                    // Remove o ID encontrado e a extensão
-                    let cleanName = file.replace('.docx', '').replace(match[0], '').trim();
-                    // Remove sujeira do início (- ou /)
-                    cleanName = cleanName.replace(/^[\s\-_/]+/, '');
-                    // Divide por traço ou barra
-                    const parts = cleanName.split(/[\-/]/).map(s => s.trim()).filter(s => s.length > 0);
-                    let cliente = parts[0] || "Desconhecido";
-                    let impressora = parts[1] || "Geral";
-                    // -------------------------------------------------------------
-                    let valor = "R$ 0,00";
-                    let telefone = "";
-                    let obs = "Recuperado pelo nome";
-                    // Se for arquivo recente, lê o conteúdo interno
-                    if (i >= startIndex) {
-                        try {
-                            const content = await fs_1.default.promises.readFile(path_1.default.join(OUTPUT_DIR, file), 'binary');
-                            const zip = new pizzip_1.default(content);
-                            if (zip.files['word/document.xml']) {
-                                const txt = zip.files['word/document.xml'].asText().replace(/<[^>]+>/g, ' ');
-                                // Busca valores monetários
-                                const vMatch = txt.match(/R\$\s?[\d.,]+/);
-                                // Busca telefones
-                                const tMatch = txt.match(/(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}/);
-                                if (vMatch)
-                                    valor = vMatch[0];
-                                if (tMatch)
-                                    telefone = tMatch[0];
-                                obs = "Sincronizado Completo";
-                            }
-                        }
-                        catch (e) { /* Ignora erro de leitura */ }
-                    }
-                    recovered.push({
-                        os: id,
-                        data: stats.birthtime.toLocaleDateString('pt-BR'),
-                        cliente: cliente,
-                        impressora: impressora,
-                        status: file.toLowerCase().includes('entregue') ? 'Entregue' : 'Em Análise',
-                        valor, telefone,
-                        orcamento: "Recuperado",
-                        obs
-                    });
-                }
-            }
-        }
-        // Remove duplicados mantendo o mais recente e ordena
-        const uniqueMap = new Map();
-        recovered.forEach(item => uniqueMap.set(item.os, item));
-        const uniqueRecovered = Array.from(uniqueMap.values()).sort((a, b) => a.os - b.os);
-        console.log(`[SCAN] Concluído. ${uniqueRecovered.length} arquivos.`);
-        return { success: true, data: { ultimo_numero: maxId, historico: uniqueRecovered } };
-    }
-    catch (e) {
-        return { success: false, error: String(e) };
-    }
-});
-// 5. Deletar Arquivo
-electron_1.ipcMain.handle('delete-os-file', async (event, osId) => {
+// --- API HANDLERS ---
+// 1. Banco de Dados
+electron_1.ipcMain.handle('db-load', () => dbService.load());
+electron_1.ipcMain.handle('db-save', (_, data) => dbService.save(data));
+// 2. Documentos
+electron_1.ipcMain.handle('generate-docx', (_, data) => wordService.generate(data));
+// 3. Sistema de Arquivos (Scan e Gestão)
+electron_1.ipcMain.handle('scan-files', () => scanService.scanFiles());
+electron_1.ipcMain.handle('delete-os-file', async (_, osId) => {
+    if (typeof osId !== 'number')
+        return { success: false, error: "ID inválido" };
     try {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: true };
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        // Procura qualquer arquivo que comece com o ID seguido de delimitadores comuns
+        // Regex para garantir que deletamos o arquivo certo (ID no início)
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file)
@@ -238,22 +71,17 @@ electron_1.ipcMain.handle('delete-os-file', async (event, osId) => {
         return { success: false, error: String(e) };
     }
 });
-// --- SISTEMA ---
-electron_1.ipcMain.handle('open-folder', async (event, type) => {
-    try {
-        const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
-        if (!fs_1.default.existsSync(target))
-            await fs_1.default.promises.mkdir(target, { recursive: true });
-        await electron_1.shell.openPath(target);
-    }
-    catch (e) {
-        console.error("[FOLDER] Erro:", e);
-    }
+electron_1.ipcMain.handle('open-folder', async (_, type) => {
+    const target = type === 'backup' ? BACKUP_DIR : OUTPUT_DIR;
+    if (!fs_1.default.existsSync(target))
+        await fs_1.default.promises.mkdir(target, { recursive: true });
+    await electron_1.shell.openPath(target);
 });
-electron_1.ipcMain.handle('open-os-file', async (event, osId) => {
+electron_1.ipcMain.handle('open-os-file', async (_, osId) => {
+    if (typeof osId !== 'number')
+        return { success: false, error: "ID inválido" };
     try {
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        // Busca inteligente também na hora de abrir
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file) {

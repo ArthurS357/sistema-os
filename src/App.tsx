@@ -1,6 +1,6 @@
 import React from 'react';
 import { Toaster } from 'sonner';
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw } from 'lucide-react';
 
 // Componentes
 import { DashboardStats } from './components/DashboardStats';
@@ -11,27 +11,58 @@ import { OSList } from './components/OSList';
 import { useOSSystem } from './hooks/useOSSystem';
 
 const App: React.FC = () => {
-  // Chamamos nosso Custom Hook que nos devolve tudo pronto, incluindo paginação e busca
   const {
     db,
-    displayItems, // Itens filtrados da página atual
+    displayItems,
     pagination,
     search,
     form,
     setForm,
     editingId,
     loading,
+    error,  // Recebendo erro
+    retry,  // Recebendo função de recarregar
     actions
   } = useOSSystem();
 
+  // --- TELA DE CARREGAMENTO ---
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 text-slate-400 animate-pulse">
-        Carregando Sistema...
+      <div className="flex flex-col h-screen items-center justify-center bg-slate-50 text-slate-400 gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <p className="font-medium animate-pulse">Carregando Sistema...</p>
       </div>
     );
   }
 
+  // --- TELA DE ERRO FATAL (NOVA) ---
+  if (error) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-rose-50 text-rose-800 p-8 text-center">
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-rose-100 max-w-md w-full flex flex-col items-center">
+          <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mb-4">
+            <AlertTriangle size={32} />
+          </div>
+          <h1 className="text-xl font-bold mb-2">Erro de Conexão</h1>
+          <p className="text-slate-600 mb-6 text-sm">
+            Não foi possível carregar o Banco de Dados.<br />
+            O arquivo pode estar em uso ou corrompido.
+          </p>
+          <div className="bg-rose-50 border border-rose-200 p-3 rounded-lg text-xs font-mono text-rose-700 w-full mb-6 break-words">
+            {error}
+          </div>
+          <button
+            onClick={retry}
+            className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-lg flex justify-center items-center gap-2 transition-colors"
+          >
+            <RefreshCw size={18} /> Tentar Novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- TELA NORMAL DO SISTEMA ---
   return (
     <div className="flex h-screen bg-slate-100 font-sans p-4 gap-5 overflow-hidden text-slate-700">
       <Toaster position="top-right" richColors />
@@ -50,10 +81,10 @@ const App: React.FC = () => {
       {/* Área Direita (Dashboard + Lista) */}
       <div className="flex-1 flex flex-col gap-4 h-full overflow-hidden">
 
-        {/* 1. Stats (Usa o banco completo para totais reais) */}
+        {/* Stats */}
         <DashboardStats historico={db.historico} />
 
-        {/* 2. Barra de Busca */}
+        {/* Barra de Busca */}
         <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 shrink-0">
           <div className="bg-slate-100 p-2 rounded-lg text-slate-400">
             <Search size={20} />
@@ -70,10 +101,10 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. Lista (Usa apenas os itens da página atual) */}
+        {/* Lista */}
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           <OSList
-            historico={displayItems} // Passamos apenas os 50 itens aqui!
+            historico={displayItems}
             editingId={editingId}
             onEdit={actions.edit}
             onSync={actions.sync}
@@ -81,7 +112,7 @@ const App: React.FC = () => {
           />
         </div>
 
-        {/* 4. Controles de Paginação */}
+        {/* Paginação */}
         <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center shrink-0">
           <button
             onClick={() => pagination.setCurrentPage(p => Math.max(1, p - 1))}
@@ -103,7 +134,6 @@ const App: React.FC = () => {
             Próxima <ChevronRight size={18} />
           </button>
         </div>
-
       </div>
     </div>
   );
