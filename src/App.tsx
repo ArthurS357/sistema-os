@@ -1,4 +1,4 @@
-import React, { useRef } from 'react'; // Importar useRef
+import React, { useRef } from 'react';
 import { Toaster } from 'sonner';
 import { Search, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw, Command } from 'lucide-react';
 
@@ -8,8 +8,9 @@ import { OSForm } from './components/OSForm';
 import { OSList } from './components/OSList';
 
 // Hooks
-import { useOSSystem } from './hooks/useOSSystem';
-import { useShortcuts } from './hooks/useShortcuts'; // Importar novo hook
+// CORREÇÃO AQUI: Adicionado 'type' antes de FilterStatus
+import { useOSSystem, type FilterStatus } from './hooks/useOSSystem';
+import { useShortcuts } from './hooks/useShortcuts';
 
 const App: React.FC = () => {
   const {
@@ -23,10 +24,11 @@ const App: React.FC = () => {
     loading,
     error,
     retry,
-    actions
+    actions,
+    filter
   } = useOSSystem();
 
-  // Ref para focar na busca via teclado
+  // Ref para focar na busca via teclado (Ctrl+F)
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // --- ATALHOS DE TECLADO ---
@@ -36,6 +38,19 @@ const App: React.FC = () => {
     onNew: actions.clear,              // F2
     onSearchFocus: () => searchInputRef.current?.focus() // Ctrl+F
   });
+
+  // Componente auxiliar para as Abas de Filtro
+  const FilterTab = ({ label, value, active }: { label: string, value: FilterStatus, active: boolean }) => (
+    <button
+      onClick={() => filter.set(value)}
+      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${active
+          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+          : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+        }`}
+    >
+      {label}
+    </button>
+  );
 
   // --- TELA DE CARREGAMENTO ---
   if (loading) {
@@ -74,6 +89,7 @@ const App: React.FC = () => {
     );
   }
 
+  // --- TELA NORMAL DO SISTEMA ---
   return (
     <div className="flex h-screen bg-slate-100 font-sans p-4 gap-5 overflow-hidden text-slate-700">
       <Toaster position="top-right" richColors />
@@ -92,30 +108,44 @@ const App: React.FC = () => {
       {/* Área Direita (Dashboard + Lista) */}
       <div className="flex-1 flex flex-col gap-4 h-full overflow-hidden">
 
-        {/* Stats */}
-        <DashboardStats historico={db.historico} />
+        {/* Stats (Conectado com Filtro) */}
+        <DashboardStats
+          historico={db.historico}
+          onOpenPending={() => filter.set('active')}
+        />
 
-        {/* Barra de Busca */}
-        <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 shrink-0 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
-          <div className="bg-slate-100 p-2 rounded-lg text-slate-400">
-            <Search size={20} />
-          </div>
-          <input
-            ref={searchInputRef} // Conectando a ref
-            type="text"
-            placeholder="Buscar por Cliente, Número da O.S. ou Equipamento... (Ctrl+F)"
-            className="flex-1 bg-transparent outline-none text-sm font-medium placeholder:text-slate-400"
-            value={search.value}
-            onChange={(e) => search.onChange(e.target.value)}
-          />
+        {/* --- ÁREA DE FILTROS E BUSCA --- */}
+        <div className="flex flex-col gap-2 shrink-0">
 
-          {/* Dica visual de atalho */}
-          <div className="hidden xl:flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-            <Command size={10} /> F
+          {/* Abas de Navegação (Tabs) */}
+          <div className="flex gap-2">
+            <FilterTab label="Todas" value="all" active={filter.value === 'all'} />
+            <FilterTab label="Na Bancada" value="active" active={filter.value === 'active'} />
+            <FilterTab label="Finalizadas" value="finished" active={filter.value === 'finished'} />
           </div>
 
-          <div className="text-xs font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 whitespace-nowrap">
-            Total: {pagination.totalItems}
+          {/* Barra de Busca */}
+          <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
+            <div className="bg-slate-100 p-2 rounded-lg text-slate-400">
+              <Search size={20} />
+            </div>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Buscar por Cliente, Número da O.S. ou Equipamento... (Ctrl+F)"
+              className="flex-1 bg-transparent outline-none text-sm font-medium placeholder:text-slate-400"
+              value={search.value}
+              onChange={(e) => search.onChange(e.target.value)}
+            />
+
+            {/* Dica Visual do Atalho */}
+            <div className="hidden xl:flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+              <Command size={10} /> F
+            </div>
+
+            <div className="text-xs font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 whitespace-nowrap">
+              Total: {pagination.totalItems}
+            </div>
           </div>
         </div>
 
@@ -152,7 +182,6 @@ const App: React.FC = () => {
             Próxima <ChevronRight size={18} />
           </button>
         </div>
-
       </div>
     </div>
   );

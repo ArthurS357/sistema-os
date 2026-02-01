@@ -8,9 +8,10 @@ import { parseCurrency, formatCurrencyDisplay } from '../utils/formatters';
 
 interface DashboardStatsProps {
     historico: OSHistoryItem[];
+    onOpenPending?: () => void; // <--- NOVA PROP: Função de clique opcional
 }
 
-export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico }) => {
+export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico, onOpenPending }) => {
 
     const stats = useMemo(() => {
         const hojeDate = new Date();
@@ -107,19 +108,25 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({ historico }) => 
                     </p>
                 </div>
 
-                {/* Card 3: Pendente (Backlog) */}
-                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                {/* Card 3: Pendente (Backlog) - INTERATIVO */}
+                <div
+                    onClick={onOpenPending} // <--- AÇÃO DE CLIQUE
+                    className={`bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between group transition-all ${onOpenPending ? 'cursor-pointer hover:ring-2 hover:ring-amber-400/50 hover:bg-amber-50/30' : ''
+                        }`}
+                >
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase">Em Aberto</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase group-hover:text-amber-600 transition-colors">
+                                Em Aberto
+                            </p>
                             <h3 className="text-2xl font-bold text-amber-600 mt-1">{stats.pendente}</h3>
                         </div>
-                        <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+                        <div className="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:bg-amber-100 transition-colors">
                             <Hourglass size={20} />
                         </div>
                     </div>
-                    <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-                        <BarChart3 size={12} /> {stats.countPendente} aparelhos na fila
+                    <p className="text-xs text-slate-400 mt-2 flex items-center gap-1 group-hover:text-amber-700 transition-colors">
+                        <BarChart3 size={12} /> {stats.countPendente} na fila (Clique p/ ver)
                     </p>
                 </div>
             </div>
