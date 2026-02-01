@@ -1,14 +1,15 @@
-import React from 'react';
+import React, { useRef } from 'react'; // Importar useRef
 import { Toaster } from 'sonner';
-import { Search, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw, Command } from 'lucide-react';
 
 // Componentes
 import { DashboardStats } from './components/DashboardStats';
 import { OSForm } from './components/OSForm';
 import { OSList } from './components/OSList';
 
-// Hook de Lógica
+// Hooks
 import { useOSSystem } from './hooks/useOSSystem';
+import { useShortcuts } from './hooks/useShortcuts'; // Importar novo hook
 
 const App: React.FC = () => {
   const {
@@ -20,10 +21,21 @@ const App: React.FC = () => {
     setForm,
     editingId,
     loading,
-    error,  // Recebendo erro
-    retry,  // Recebendo função de recarregar
+    error,
+    retry,
     actions
   } = useOSSystem();
+
+  // Ref para focar na busca via teclado
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // --- ATALHOS DE TECLADO ---
+  useShortcuts({
+    onSave: () => actions.save(false), // Ctrl+S
+    onPrint: () => actions.save(true),  // Ctrl+P
+    onNew: actions.clear,              // F2
+    onSearchFocus: () => searchInputRef.current?.focus() // Ctrl+F
+  });
 
   // --- TELA DE CARREGAMENTO ---
   if (loading) {
@@ -35,7 +47,7 @@ const App: React.FC = () => {
     );
   }
 
-  // --- TELA DE ERRO FATAL (NOVA) ---
+  // --- TELA DE ERRO FATAL ---
   if (error) {
     return (
       <div className="flex flex-col h-screen items-center justify-center bg-rose-50 text-rose-800 p-8 text-center">
@@ -62,7 +74,6 @@ const App: React.FC = () => {
     );
   }
 
-  // --- TELA NORMAL DO SISTEMA ---
   return (
     <div className="flex h-screen bg-slate-100 font-sans p-4 gap-5 overflow-hidden text-slate-700">
       <Toaster position="top-right" richColors />
@@ -85,17 +96,24 @@ const App: React.FC = () => {
         <DashboardStats historico={db.historico} />
 
         {/* Barra de Busca */}
-        <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 shrink-0">
+        <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3 shrink-0 focus-within:ring-2 focus-within:ring-blue-500/20 transition-shadow">
           <div className="bg-slate-100 p-2 rounded-lg text-slate-400">
             <Search size={20} />
           </div>
           <input
+            ref={searchInputRef} // Conectando a ref
             type="text"
-            placeholder="Buscar por Cliente, Número da O.S. ou Equipamento..."
+            placeholder="Buscar por Cliente, Número da O.S. ou Equipamento... (Ctrl+F)"
             className="flex-1 bg-transparent outline-none text-sm font-medium placeholder:text-slate-400"
             value={search.value}
             onChange={(e) => search.onChange(e.target.value)}
           />
+
+          {/* Dica visual de atalho */}
+          <div className="hidden xl:flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+            <Command size={10} /> F
+          </div>
+
           <div className="text-xs font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 whitespace-nowrap">
             Total: {pagination.totalItems}
           </div>
@@ -134,6 +152,7 @@ const App: React.FC = () => {
             Próxima <ChevronRight size={18} />
           </button>
         </div>
+
       </div>
     </div>
   );
