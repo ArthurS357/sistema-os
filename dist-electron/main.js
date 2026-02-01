@@ -8,16 +8,22 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const pizzip_1 = __importDefault(require("pizzip"));
 const docxtemplater_1 = __importDefault(require("docxtemplater"));
-const electron_is_dev_1 = __importDefault(require("electron-is-dev"));
+// --- CORREÇÃO DO ERRO ESM ---
+// Substituímos a biblioteca 'electron-is-dev' pela checagem nativa do Electron.
+// Se o app NÃO estiver empacotado (!app.isPackaged), estamos em DEV.
+const isDev = !electron_1.app.isPackaged;
 let mainWindow = null;
 // --- DEFINIÇÃO INTELIGENTE DE CAMINHOS ---
-const BASE_PATH = electron_is_dev_1.default
+// Se estiver desenvolvendo (isDev): usa a pasta do projeto.
+// Se for Produção (Executável): usa a pasta onde o .exe está rodando.
+const BASE_PATH = isDev
     ? path_1.default.join(__dirname, '..')
     : (process.env.PORTABLE_EXECUTABLE_DIR || path_1.default.dirname(process.execPath));
 const DB_PATH = path_1.default.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path_1.default.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path_1.default.join(BASE_PATH, 'Backups');
-const MODELO_PATH = electron_is_dev_1.default
+// Caminho do modelo Word
+const MODELO_PATH = isDev
     ? path_1.default.join(__dirname, '../modelo_os.docx')
     : path_1.default.join(process.resourcesPath, 'modelo_os.docx');
 // Garante que as pastas de saída existam
@@ -33,7 +39,7 @@ function performBackup() {
             const timestamp = now.toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
             const backupPath = path_1.default.join(BACKUP_DIR, `backup_${timestamp}.json`);
             fs_1.default.copyFileSync(DB_PATH, backupPath);
-            // Mantém apenas os últimos 50 backups para não encher o disco
+            // Limpeza: Mantém apenas os últimos 50 backups
             const files = fs_1.default.readdirSync(BACKUP_DIR);
             if (files.length > 50) {
                 files.sort();
@@ -57,7 +63,10 @@ function createWindow() {
         autoHideMenuBar: true,
         icon: path_1.default.join(__dirname, '../public/favicon.ico')
     });
-    const startURL = electron_is_dev_1.default ? 'http://localhost:5173' : `file://${path_1.default.join(__dirname, '../dist/index.html')}`;
+    // Configuração da URL de início baseada no ambiente
+    const startURL = isDev
+        ? 'http://localhost:5173'
+        : `file://${path_1.default.join(__dirname, '../dist/index.html')}`;
     mainWindow.loadURL(startURL);
 }
 // --- HANDLERS (PROCESSOS) ---
@@ -74,17 +83,22 @@ electron_1.ipcMain.handle('db-load', async () => {
     }
     return { ultimo_numero: 3825, historico: [] };
 });
-// 2. Salvar Banco
+// 2. Salvar Banco (COM ESCRITA ATÔMICA - Mais Seguro)
 electron_1.ipcMain.handle('db-save', async (event, data) => {
     try {
-        await fs_1.default.promises.writeFile(DB_PATH, JSON.stringify(data, null, 4), 'utf-8');
+        const jsonContent = JSON.stringify(data, null, 4);
+        const tempPath = `${DB_PATH}.tmp`;
+        // 1. Salva em um arquivo temporário primeiro
+        await fs_1.default.promises.writeFile(tempPath, jsonContent, 'utf-8');
+        // 2. Substitui o original instantaneamente (Atomic Rename)
+        await fs_1.default.promises.rename(tempPath, DB_PATH);
         return { success: true };
     }
     catch (e) {
         return { success: false, error: String(e) };
     }
 });
-// 3. Gerar DOCX (CORREÇÃO DE TRAVAMENTO AQUI)
+// 3. Gerar DOCX (ANTI-TRAVAMENTO)
 electron_1.ipcMain.handle('generate-docx', async (event, data) => {
     console.log(`[DOCX] Iniciando geração para OS #${data.os}...`);
     try {
@@ -98,7 +112,7 @@ electron_1.ipcMain.handle('generate-docx', async (event, data) => {
         catch (e) {
             return { success: false, error: "Arquivo modelo corrompido ou inválido." };
         }
-        // --- MUDANÇA CRÍTICA: paragraphLoop: false evita loops infinitos ---
+        // paragraphLoop: false é essencial para evitar loops infinitos
         const doc = new docxtemplater_1.default(zip, {
             paragraphLoop: false,
             linebreaks: true
@@ -124,43 +138,56 @@ electron_1.ipcMain.handle('generate-docx', async (event, data) => {
         return { success: false, error: String(e.message || e) };
     }
 });
-// 4. Scan Inteligente (OTIMIZADO PARA NÃO TRAVAR)
+// 4. Scan Inteligente (COM REGEX AVANÇADO)
 electron_1.ipcMain.handle('scan-files', async () => {
-    console.log("[SCAN] Iniciando varredura...");
+    console.log("[SCAN] Iniciando varredura inteligente...");
     try {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: false, count: 0 };
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
         const recovered = [];
         let maxId = 3825;
-        // Filtra apenas arquivos .docx válidos
+        // Regex poderosa para achar IDs no início do arquivo
+        // Aceita: "3500...", "OS 3500...", "O.S. 3500...", "Pedido 3500..."
+        const idRegex = /^(?:O\.?S\.?|Nº?|PEDIDO)?\s*[.\-_]?\s*(\d{3,6})/i;
         const docxFiles = files.filter(f => f.endsWith('.docx'));
-        // OTIMIZAÇÃO: Limita a leitura profunda aos últimos 100 arquivos para performance
-        // (Arquivos mais antigos são recuperados apenas pelo nome)
+        // Limita a leitura profunda aos últimos 100 arquivos para não travar
         const recentFilesLimit = 100;
         const startIndex = Math.max(0, docxFiles.length - recentFilesLimit);
-        // Processa arquivos
         for (let i = 0; i < docxFiles.length; i++) {
             const file = docxFiles[i];
-            const parts = file.replace('.docx', '').split(' - ');
-            if (parts.length >= 2) {
-                const id = parseInt(parts[0]);
-                if (!isNaN(id)) {
+            // Tenta extrair o ID com a Regex
+            const match = file.match(idRegex);
+            if (match && match[1]) {
+                const id = parseInt(match[1]);
+                if (!isNaN(id) && id > 0) {
                     if (id > maxId)
                         maxId = id;
                     const stats = await fs_1.default.promises.stat(path_1.default.join(OUTPUT_DIR, file));
+                    // --- Tenta adivinhar Cliente e Máquina pelo nome do arquivo ---
+                    // Remove o ID encontrado e a extensão
+                    let cleanName = file.replace('.docx', '').replace(match[0], '').trim();
+                    // Remove sujeira do início (- ou /)
+                    cleanName = cleanName.replace(/^[\s\-_/]+/, '');
+                    // Divide por traço ou barra
+                    const parts = cleanName.split(/[\-/]/).map(s => s.trim()).filter(s => s.length > 0);
+                    let cliente = parts[0] || "Desconhecido";
+                    let impressora = parts[1] || "Geral";
+                    // -------------------------------------------------------------
                     let valor = "R$ 0,00";
                     let telefone = "";
                     let obs = "Recuperado pelo nome";
-                    // Só lê o conteúdo interno (pesado) se for um arquivo recente
+                    // Se for arquivo recente, lê o conteúdo interno
                     if (i >= startIndex) {
                         try {
                             const content = await fs_1.default.promises.readFile(path_1.default.join(OUTPUT_DIR, file), 'binary');
                             const zip = new pizzip_1.default(content);
                             if (zip.files['word/document.xml']) {
                                 const txt = zip.files['word/document.xml'].asText().replace(/<[^>]+>/g, ' ');
+                                // Busca valores monetários
                                 const vMatch = txt.match(/R\$\s?[\d.,]+/);
-                                const tMatch = txt.match(/\(\d{2}\)\s?\d{4,5}-?\d{4}/);
+                                // Busca telefones
+                                const tMatch = txt.match(/(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}/);
                                 if (vMatch)
                                     valor = vMatch[0];
                                 if (tMatch)
@@ -168,14 +195,14 @@ electron_1.ipcMain.handle('scan-files', async () => {
                                 obs = "Sincronizado Completo";
                             }
                         }
-                        catch (e) { /* Ignora erro de leitura interna */ }
+                        catch (e) { /* Ignora erro de leitura */ }
                     }
                     recovered.push({
                         os: id,
                         data: stats.birthtime.toLocaleDateString('pt-BR'),
-                        cliente: parts[1] || "?",
-                        impressora: parts[2] || "?",
-                        status: parts[3] || "Em Análise",
+                        cliente: cliente,
+                        impressora: impressora,
+                        status: file.toLowerCase().includes('entregue') ? 'Entregue' : 'Em Análise',
                         valor, telefone,
                         orcamento: "Recuperado",
                         obs
@@ -183,9 +210,12 @@ electron_1.ipcMain.handle('scan-files', async () => {
                 }
             }
         }
-        recovered.sort((a, b) => a.os - b.os);
-        console.log(`[SCAN] Concluído. ${recovered.length} arquivos processados.`);
-        return { success: true, data: { ultimo_numero: maxId, historico: recovered } };
+        // Remove duplicados mantendo o mais recente e ordena
+        const uniqueMap = new Map();
+        recovered.forEach(item => uniqueMap.set(item.os, item));
+        const uniqueRecovered = Array.from(uniqueMap.values()).sort((a, b) => a.os - b.os);
+        console.log(`[SCAN] Concluído. ${uniqueRecovered.length} arquivos.`);
+        return { success: true, data: { ultimo_numero: maxId, historico: uniqueRecovered } };
     }
     catch (e) {
         return { success: false, error: String(e) };
@@ -197,7 +227,9 @@ electron_1.ipcMain.handle('delete-os-file', async (event, osId) => {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: true };
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
+        // Procura qualquer arquivo que comece com o ID seguido de delimitadores comuns
+        const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
+        const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file)
             await fs_1.default.promises.unlink(path_1.default.join(OUTPUT_DIR, file));
         return { success: true };
@@ -221,7 +253,9 @@ electron_1.ipcMain.handle('open-folder', async (event, type) => {
 electron_1.ipcMain.handle('open-os-file', async (event, osId) => {
     try {
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        const file = files.find(f => f.startsWith(`${osId} - `) && f.endsWith('.docx'));
+        // Busca inteligente também na hora de abrir
+        const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
+        const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file) {
             await electron_1.shell.openPath(path_1.default.join(OUTPUT_DIR, file));
             return { success: true };

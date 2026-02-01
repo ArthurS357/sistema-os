@@ -3,11 +3,17 @@ import path from 'path';
 import fs from 'fs';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import isDev from 'electron-is-dev';
+
+// --- CORREÇÃO DO ERRO ESM ---
+// Substituímos a biblioteca 'electron-is-dev' pela checagem nativa do Electron.
+// Se o app NÃO estiver empacotado (!app.isPackaged), estamos em DEV.
+const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 
 // --- DEFINIÇÃO INTELIGENTE DE CAMINHOS ---
+// Se estiver desenvolvendo (isDev): usa a pasta do projeto.
+// Se for Produção (Executável): usa a pasta onde o .exe está rodando.
 const BASE_PATH = isDev
     ? path.join(__dirname, '..')
     : (process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath));
@@ -16,6 +22,7 @@ const DB_PATH = path.join(BASE_PATH, 'banco_dados.json');
 const OUTPUT_DIR = path.join(BASE_PATH, 'OS_Geradas');
 const BACKUP_DIR = path.join(BASE_PATH, 'Backups');
 
+// Caminho do modelo Word
 const MODELO_PATH = isDev
     ? path.join(__dirname, '../modelo_os.docx')
     : path.join(process.resourcesPath, 'modelo_os.docx');
@@ -58,7 +65,11 @@ function createWindow(): void {
         icon: path.join(__dirname, '../public/favicon.ico')
     });
 
-    const startURL = isDev ? 'http://localhost:5173' : `file://${path.join(__dirname, '../dist/index.html')}`;
+    // Configuração da URL de início baseada no ambiente
+    const startURL = isDev
+        ? 'http://localhost:5173'
+        : `file://${path.join(__dirname, '../dist/index.html')}`;
+
     mainWindow.loadURL(startURL);
 }
 
