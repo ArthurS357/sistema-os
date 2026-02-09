@@ -1,4 +1,16 @@
 {
-    "ultimo_numero": 3829,
-    "historico": []
+    "ultimo_numero": 3831,
+    "historico": [
+        {
+            "os": 3831,
+            "data": "01/02/2026",
+            "cliente": "asdasdasda",
+            "telefone": "(12) 31231-2312",
+            "impressora": "awdas",
+            "orcamento": "Em andamento",
+            "valor": "R$ 12.312,31",
+            "obs": "Deixou: Cabo Força, Cartuchos Ass. - asd",
+            "status": "Em Análise"
+        }
+    ]
 }

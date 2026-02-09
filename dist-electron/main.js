@@ -11,7 +11,7 @@ const BackupService_1 = require("./services/BackupService");
 const WordService_1 = require("./services/WordService");
 const DatabaseService_1 = require("./services/DatabaseService");
 const ScanService_1 = require("./services/ScanService");
-// --- CONFIGURAÇÃO ---
+// --- CONFIGURAÇÃO DE AMBIENTE ---
 const isDev = !electron_1.app.isPackaged;
 const BASE_PATH = isDev
     ? path_1.default.join(__dirname, '..')
@@ -29,9 +29,12 @@ const dbService = new DatabaseService_1.DatabaseService(DB_PATH);
 const scanService = new ScanService_1.ScanService(OUTPUT_DIR);
 let mainWindow = null;
 function createWindow() {
+    // Executa backup automático ao iniciar
     backupService.performBackup();
     mainWindow = new electron_1.BrowserWindow({
-        width: 1280, height: 800, title: "Cap.Com System",
+        width: 1280,
+        height: 800,
+        title: "Cap.Com System",
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -45,7 +48,7 @@ function createWindow() {
         : `file://${path_1.default.join(__dirname, '../dist/index.html')}`;
     mainWindow.loadURL(startURL);
 }
-// --- API HANDLERS ---
+// --- API HANDLERS (COMUNICAÇÃO FRONTEND <-> BACKEND) ---
 // 1. Banco de Dados
 electron_1.ipcMain.handle('db-load', () => dbService.load());
 electron_1.ipcMain.handle('db-save', (_, data) => dbService.save(data));
@@ -53,6 +56,14 @@ electron_1.ipcMain.handle('db-save', (_, data) => dbService.save(data));
 electron_1.ipcMain.handle('generate-docx', (_, data) => wordService.generate(data));
 // 3. Sistema de Arquivos (Scan e Gestão)
 electron_1.ipcMain.handle('scan-files', () => scanService.scanFiles());
+// NOVA ROTA: Sincronizar Arquivo Único (Manual)
+electron_1.ipcMain.handle('scan-single', async (_, osId) => {
+    if (typeof osId !== 'number')
+        return { success: false, error: "ID inválido" };
+    // Chama a função otimizada para ler apenas um arquivo específico
+    return await scanService.syncSingleFile(osId);
+});
+// 4. Operações de Arquivo
 electron_1.ipcMain.handle('delete-os-file', async (_, osId) => {
     if (typeof osId !== 'number')
         return { success: false, error: "ID inválido" };
@@ -60,7 +71,7 @@ electron_1.ipcMain.handle('delete-os-file', async (_, osId) => {
         if (!fs_1.default.existsSync(OUTPUT_DIR))
             return { success: true };
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
-        // Regex para garantir que deletamos o arquivo certo (ID no início)
+        // Regex para garantir que deletamos o arquivo certo
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file)
@@ -82,6 +93,7 @@ electron_1.ipcMain.handle('open-os-file', async (_, osId) => {
         return { success: false, error: "ID inválido" };
     try {
         const files = await fs_1.default.promises.readdir(OUTPUT_DIR);
+        // Regex para encontrar o arquivo para abrir
         const idRegex = new RegExp(`^(?:O\\.?S\\.?)?\\s*${osId}[\\s.\\-_]`, 'i');
         const file = files.find(f => f.endsWith('.docx') && idRegex.test(f));
         if (file) {
