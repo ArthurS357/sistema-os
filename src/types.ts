@@ -2,6 +2,7 @@
 export interface OSHistoryItem {
     os: number;
     data: string;
+    data_saida?: string;
     cliente: string;
     telefone: string;
     impressora: string;

@@ -146,9 +146,10 @@ export const useOSSystem = () => {
         let newHistory = [...db.historico];
         let newUltimoNumero = db.ultimo_numero;
 
+        // Objeto base para salvamento
         const osDataToSave: OSHistoryItem = {
             os: 0,
-            data: dataHoje,
+            data: dataHoje, // Será usado para NOVAS OS. Em edições, sobrescrevemos abaixo.
             cliente: form.cliente,
             telefone: form.telefone,
             impressora: form.impressora,
@@ -159,15 +160,46 @@ export const useOSSystem = () => {
         };
 
         if (editingId === null) {
+            // --- CADASTRANDO NOVA ---
             currentId = db.ultimo_numero + 1;
             newUltimoNumero = currentId;
             osDataToSave.os = currentId;
+
+            // Se já criar como Entregue, define a data de saída hoje
+            if (form.status.toLowerCase().includes('entregue')) {
+                osDataToSave.data_saida = dataHoje;
+            }
+
             newHistory.push(osDataToSave);
         } else {
+            // --- EDITANDO EXISTENTE ---
             currentId = editingId;
-            newHistory = newHistory.map(item =>
-                item.os === editingId ? { ...osDataToSave, os: editingId, data: item.data } : item
-            );
+            newHistory = newHistory.map(item => {
+                if (item.os === editingId) {
+                    // Lógica para Data de Saída
+                    const estavaEntregue = item.status.toLowerCase().includes('entregue');
+                    const estaEntregandoAgora = form.status.toLowerCase().includes('entregue');
+
+                    let novaDataSaida = item.data_saida;
+
+                    // 1. Mudou para entregue agora? -> Grava data de hoje
+                    if (estaEntregandoAgora && !estavaEntregue) {
+                        novaDataSaida = dataHoje;
+                    }
+                    // 2. Mudou de entregue para pendente? -> Limpa a data
+                    else if (!estaEntregandoAgora) {
+                        novaDataSaida = undefined;
+                    }
+
+                    return {
+                        ...osDataToSave,
+                        os: editingId,
+                        data: item.data, // IMPORTANTE: Mantém a data de entrada original
+                        data_saida: novaDataSaida
+                    };
+                }
+                return item;
+            });
         }
 
         await saveToDisk({ ultimo_numero: newUltimoNumero, historico: newHistory });
@@ -177,6 +209,8 @@ export const useOSSystem = () => {
             const docResult = await window.api.generateDocx({
                 ...osDataToSave,
                 os: currentId!,
+                // Se quiser que a data de saída saia no Word, inclua ela aqui também:
+                // data_saida: osDataToSave.data_saida 
             });
             if (docResult.success && !print) toast.success(`O.S. ${currentId} salva!`);
             else if (!docResult.success) toast.error(`Erro Word: ${docResult.error}`);
@@ -226,11 +260,9 @@ export const useOSSystem = () => {
         }
     };
 
-    // --- CORREÇÃO AQUI: Usando o método nomeado ---
     const handleSyncSingle = async (osId: number) => {
         const toastId = toast.loading("Lendo arquivo...");
         try {
-            // Agora chamamos window.api.scanSingle em vez de invoke direto
             const result = await window.api.scanSingle(osId);
 
             if (result.success && result.data) {

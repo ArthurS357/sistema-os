@@ -71,13 +71,14 @@ function createWindow(): void {
         width: 1280,
         height: 800,
         title: "Cap.Com System",
+        show: false, // <--- INICIA OCULTO
+        backgroundColor: '#1e1e1e', // <--- COR DE FUNDO (ajuste para a cor do seu app)
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
         autoHideMenuBar: true,
-        // Garante que o ícone exista ou usa padrão do sistema
         icon: fs.existsSync(path.join(__dirname, '../public/favicon.ico'))
             ? path.join(__dirname, '../public/favicon.ico')
             : undefined
@@ -88,7 +89,10 @@ function createWindow(): void {
         : `file://${path.join(__dirname, '../dist/index.html')}`;
 
     mainWindow.loadURL(startURL);
-
+    
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
+    });
     // Tratamento de erro de carregamento (Tela Branca)
     mainWindow.webContents.on('did-fail-load', () => {
         dialog.showErrorBox(
