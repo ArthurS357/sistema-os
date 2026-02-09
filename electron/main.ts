@@ -39,6 +39,26 @@ const scanService = new ScanService(OUTPUT_DIR);
 
 let mainWindow: BrowserWindow | null = null;
 
+// --- SINGLE INSTANCE LOCK (PROTEÇÃO CONTRA MÚLTIPLAS JANELAS) ---
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+    // Se já houver uma instância aberta, fecha esta imediatamente
+    app.quit();
+} else {
+    // Se for a primeira instância, define o comportamento
+    app.on('second-instance', () => {
+        // Alguém tentou abrir uma segunda janela -> Foca na janela principal já existente
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
+
+    // Inicia o app apenas se obteve o lock
+    app.whenReady().then(createWindow);
+}
+
 function createWindow(): void {
     // Tenta fazer backup ao iniciar, mas protegido contra erros para não travar o boot
     try {
@@ -75,6 +95,7 @@ function createWindow(): void {
             'Erro de Carregamento',
             'A interface não pôde ser carregada. Se estiver em produção, verifique se a pasta "dist" foi gerada corretamente.'
         );
+        // Em produção, se der erro, permite abrir devtools para debug
         if (!isDev) mainWindow?.webContents.openDevTools();
     });
 }
@@ -144,5 +165,9 @@ ipcMain.handle('open-os-file', async (_, osId) => {
     } catch (e) { return { success: false, error: String(e) }; }
 });
 
-app.whenReady().then(createWindow);
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+    // No Windows, fecha o app quando todas janelas fecham
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
+});

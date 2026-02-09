@@ -1,9 +1,9 @@
 {
   "name": "sistema-os",
   "version": "1.0.0",
-  "description": "Sistema de Gestão de Ordens de Serviço",
+  "description": "Sistema de Gerenciamento de Ordens de Serviço v1",
   "main": "dist-electron/main.js",
-  "author": "Seu Nome ou Empresa",
+  "author": "Arthur S.",
   "private": true,
   "scripts": {
     "dev": "vite",
