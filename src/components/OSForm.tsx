@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
     Save, Printer, Trash2, RefreshCw, Phone,
     FileText, Monitor, User, DollarSign
@@ -18,18 +18,37 @@ interface OSFormProps {
     onClear: () => void;
     onDelete: () => void;
     onOpenWord: () => void;
-    // --- ADICIONADO AQUI: Nova propriedade para o botão de sync manual
     onSyncSingle: (id: number) => void;
 }
 
 export const OSForm: React.FC<OSFormProps> = ({
     form, setForm, editingId, onSave, onClear, onDelete, onOpenWord, onSyncSingle
 }) => {
+    // Estado para controlar a quantidade de vias na impressão
+    const [vias, setVias] = useState<number>(1);
 
     const openWhatsapp = () => {
         const num = cleanPhone(form.telefone);
         if (num.length >= 10) window.open(`https://wa.me/55${num}`, '_blank');
         else toast.warning('Número inválido.');
+    };
+
+    // Função para imprimir 1 via
+    const handleImprimir1Via = () => {
+        setVias(1);
+        setTimeout(() => {
+            onSave(true);
+        }, 50); // Aguarda a DOM atualizar antes de chamar a janela de impressão
+    };
+
+    // Função para imprimir 2 vias
+    const handleImprimir2Vias = () => {
+        setVias(2);
+        setTimeout(() => {
+            onSave(true);
+            // Restaura para 1 via após um tempinho para não afetar impressões futuras
+            setTimeout(() => setVias(1), 1000);
+        }, 50);
     };
 
     return (
@@ -108,9 +127,16 @@ export const OSForm: React.FC<OSFormProps> = ({
                 <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
                     <button onClick={() => onSave(false)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-lg flex justify-center items-center gap-2"><Save size={20} /> SALVAR</button>
                     <div className="flex gap-2">
-                        <button onClick={() => onSave(true)} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-medium shadow-md flex justify-center items-center gap-2"><Printer size={18} /> + Imprimir</button>
-                        <button onClick={onClear} className="px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 py-2.5 rounded-xl font-medium flex justify-center items-center gap-2"><RefreshCw size={18} /></button>
-                        {editingId && <button onClick={onDelete} className="px-4 bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-600 py-2.5 rounded-xl flex justify-center items-center"><Trash2 size={18} /></button>}
+                        {/* Botões de Impressão Separados */}
+                        <button onClick={handleImprimir1Via} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-medium shadow-md flex justify-center items-center gap-2 text-sm">
+                            <Printer size={16} /> 1 Via
+                        </button>
+                        <button onClick={handleImprimir2Vias} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-medium shadow-md flex justify-center items-center gap-2 text-sm">
+                            <Printer size={16} /> 2 Vias
+                        </button>
+
+                        <button onClick={onClear} className="px-3 sm:px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 py-2.5 rounded-xl font-medium flex justify-center items-center gap-2"><RefreshCw size={18} /></button>
+                        {editingId && <button onClick={onDelete} className="px-3 sm:px-4 bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-600 py-2.5 rounded-xl flex justify-center items-center"><Trash2 size={18} /></button>}
                     </div>
                     {editingId && (
                         <div className="flex gap-2 mt-1">
@@ -133,7 +159,8 @@ export const OSForm: React.FC<OSFormProps> = ({
             </div>
 
             {/* --- LAYOUT DE IMPRESSÃO (Importado) --- */}
-            <PrintLayout form={form} editingId={editingId} />
+            {/* Passando a prop "vias" para o PrintLayout */}
+            <PrintLayout form={form} editingId={editingId} vias={vias} />
         </>
     );
 };

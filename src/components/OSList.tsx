@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit, FolderOpen, RefreshCw, Download, FileText } from 'lucide-react'; // Adicionado FileText
+import { Edit, FolderOpen, RefreshCw, Download, FileText } from 'lucide-react';
 import type { OSHistoryItem } from '../types';
 
 interface OSListProps {
@@ -9,38 +9,54 @@ interface OSListProps {
     onSync: () => void;
     onOpenFolder: (type: 'os' | 'backup') => void;
     onExport: () => void;
-    onOpenWord: (id?: number) => void; // <--- Atualizado para aceitar ID opcional
+    onOpenWord: (id?: number) => void;
 }
 
 export const OSList: React.FC<OSListProps> = ({
-    historico, editingId, onEdit, onSync, onOpenFolder, onExport, onOpenWord
+    historico,
+    editingId,
+    onEdit,
+    onSync,
+    onOpenFolder,
+    onExport,
+    onOpenWord,
 }) => {
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full overflow-hidden">
             {/* Header da Lista */}
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="font-bold text-slate-700 flex items-center gap-2">
+            <div className="p-3 sm:p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm sm:text-base">
                     Histórico Recente
                     <span className="text-xs font-normal text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
                         {historico.length} exibidos
                     </span>
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex gap-1 sm:gap-2">
                     {/* Botão Exportar */}
                     <button
                         onClick={onExport}
-                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold border border-transparent hover:border-emerald-100"
+                        className="p-1.5 sm:p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold border border-transparent hover:border-emerald-100"
                         title="Exportar para Excel (CSV)"
                     >
-                        <Download size={16} /> <span className="hidden sm:inline">Excel</span>
+                        <Download size={16} />
+                        <span className="hidden sm:inline">Excel</span>
                     </button>
 
                     <div className="h-4 w-px bg-slate-300 mx-1 self-center"></div>
 
-                    <button onClick={onSync} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Sincronizar Arquivos">
+                    <button
+                        onClick={onSync}
+                        className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Sincronizar Arquivos"
+                    >
                         <RefreshCw size={18} />
                     </button>
-                    <button onClick={() => onOpenFolder('os')} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title="Abrir Pasta OS">
+
+                    <button
+                        onClick={() => onOpenFolder('os')}
+                        className="p-1.5 sm:p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Abrir Pasta OS"
+                    >
                         <FolderOpen size={18} />
                     </button>
                 </div>
@@ -48,45 +64,61 @@ export const OSList: React.FC<OSListProps> = ({
 
             {/* Tabela (Conteúdo) */}
             <div className="flex-1 overflow-y-auto">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50 sticky top-0 z-10 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <table className="w-full text-left border-collapse table-fixed sm:table-auto">
+                    <thead className="bg-slate-50 sticky top-0 z-10 text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
                         <tr>
-                            <th className="p-4 border-b border-slate-100">OS</th>
-                            <th className="p-4 border-b border-slate-100">Data</th>
-                            <th className="p-4 border-b border-slate-100">Cliente</th>
-                            <th className="p-4 border-b border-slate-100">Equipamento</th>
-                            <th className="p-4 border-b border-slate-100">Valor</th>
-                            <th className="p-4 border-b border-slate-100">Status</th>
-                            <th className="p-4 border-b border-slate-100 w-24"></th> {/* Largura ajustada */}
+                            <th className="p-3 border-b border-slate-100 w-16 sm:w-20">OS</th>
+                            {/* Oculta Data em telas menores para focar na Impressora e Cliente */}
+                            <th className="p-3 border-b border-slate-100 hidden lg:table-cell">Data</th>
+                            <th className="p-3 border-b border-slate-100">Cliente</th>
+                            <th className="p-3 border-b border-slate-100">Equipamento</th>
+                            <th className="p-3 border-b border-slate-100 w-20 sm:w-24">Valor</th>
+                            {/* Oculta Status em telas menores */}
+                            <th className="p-3 border-b border-slate-100 hidden md:table-cell">Status</th>
+                            <th className="p-3 border-b border-slate-100 w-20"></th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50 text-sm">
+                    <tbody className="divide-y divide-slate-50 text-xs sm:text-sm">
                         {historico.map((item) => (
                             <tr
                                 key={item.os}
-                                className={`hover:bg-slate-50 transition-colors group ${editingId === item.os ? 'bg-blue-50/60 hover:bg-blue-50' : ''}`}
+                                className={`hover:bg-slate-50 transition-colors group ${editingId === item.os ? 'bg-blue-50/60 hover:bg-blue-50' : ''
+                                    }`}
                             >
-                                <td className="p-4 font-mono font-bold text-slate-600">#{item.os}</td>
-                                <td className="p-4 text-slate-500">{item.data}</td>
-                                <td className="p-4 font-medium text-slate-800">{item.cliente}</td>
-                                <td className="p-4 text-slate-600 max-w-[150px] truncate" title={item.impressora}>{item.impressora}</td>
-                                <td className="p-4 font-bold text-emerald-600">{item.valor}</td>
-                                <td className="p-4">
-                                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border ${item.status.includes('Aprovado')
-                                            ? item.status.includes('Entregue') ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                                            : item.status.includes('Reprovado') ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-amber-50 text-amber-600 border-amber-100'
-                                        }`}>
+                                <td className="p-3 font-mono font-bold text-slate-600">#{item.os}</td>
+                                <td className="p-3 text-slate-500 hidden lg:table-cell">{item.data}</td>
+                                <td className="p-3 font-medium text-slate-800 truncate" title={item.cliente}>
+                                    {item.cliente}
+                                </td>
+                                <td className="p-3 text-slate-600">
+                                    {/* Container que evita a quebra de linha em nomes de equipamentos longos */}
+                                    <div className="max-w-[120px] sm:max-w-[200px] truncate" title={item.impressora}>
+                                        {item.impressora}
+                                    </div>
+                                </td>
+                                <td className="p-3 font-bold text-emerald-600">{item.valor}</td>
+                                <td className="p-3 hidden md:table-cell">
+                                    <span
+                                        className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border ${item.status.includes('Aprovado')
+                                            ? item.status.includes('Entregue')
+                                                ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                                : 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                                            : item.status.includes('Reprovado')
+                                                ? 'bg-rose-50 text-rose-600 border-rose-100'
+                                                : 'bg-amber-50 text-amber-600 border-amber-100'
+                                            }`}
+                                    >
                                         {item.status}
                                     </span>
                                 </td>
-                                <td className="p-4 text-right flex justify-end gap-1">
+                                <td className="p-3 text-right flex justify-end gap-1">
                                     {/* Botão Abrir Word Rápido */}
                                     <button
                                         onClick={(e) => {
-                                            e.stopPropagation(); // Evita ativar a linha (edição)
+                                            e.stopPropagation();
                                             onOpenWord(item.os);
                                         }}
-                                        className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        className="p-1.5 sm:p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                                         title="Abrir Arquivo Word"
                                     >
                                         <FileText size={16} />
@@ -94,7 +126,7 @@ export const OSList: React.FC<OSListProps> = ({
 
                                     <button
                                         onClick={() => onEdit(item)}
-                                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                                         title="Editar Registro"
                                     >
                                         <Edit size={16} />
