@@ -14,8 +14,17 @@ interface RecoveredItem {
     obs: string;
 }
 
+interface ScanResult {
+    success: boolean;
+    data?: { ultimo_numero: number; historico: RecoveredItem[] };
+    error?: string;
+}
+
 export class ScanService {
     private outputDir: string;
+    private readonly CONCURRENCY_LIMIT = 10;
+    private readonly MAX_FILE_SIZE = 10 * 1024 * 1024;
+    private processedCount = 0;
 
     constructor(outputDir: string) {
         this.outputDir = outputDir;
@@ -25,174 +34,238 @@ export class ScanService {
         return text.replace(/\s+/g, ' ').trim();
     }
 
-    // --- NOVA FUNÇÃO AUXILIAR: Extrai dados de um único arquivo ---
-    // Centraliza a lógica de leitura para ser usada tanto no Scan Geral quanto no Scan Único
-    private async extractInfoFromFile(filePath: string, id: number): Promise<RecoveredItem | null> {
+    private extractOsIdFromFilename(filename: string): number | null {
+        const match = filename.match(/^(\d{1,6})/);
+        if (!match) return null;
+
+        const id = parseInt(match[1]);
+        return id > 0 && id < 1000000 ? id : null;
+    }
+
+    private parseDocumentXml(xmlContent: string): {
+        telefone: string;
+        valor: string;
+        cliente: string;
+        impressora: string;
+    } {
+        const cleanText = xmlContent
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const telefone = this.extractTelephone(cleanText);
+        const valor = this.extractValue(cleanText);
+        const cliente = this.extractField(cleanText, ['cliente', 'nome'], 'cliente', 40);
+        const impressora = this.extractField(cleanText, ['equipamento', 'modelo', 'impressora'], 'impressora', 30);
+
+        return { telefone, valor, cliente, impressora };
+    }
+
+    private extractTelephone(text: string): string {
+        const match = text.match(/(?:\btelefone|tel|fone\b\s*[:;-]?\s*)?(\(\d{2}\)\s?\d{4,5}[-\s]?\d{4})/i);
+        return match ? match[1].trim() : '';
+    }
+
+    private extractValue(text: string): string {
+        const match = text.match(/R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)/);
+        return match ? `R$ ${match[1]}` : 'R$ 0,00';
+    }
+
+    private extractField(text: string, keywords: string[], fieldType: 'cliente' | 'impressora', maxLength: number): string {
+        for (const keyword of keywords) {
+            const regex = new RegExp(`(?:${keyword})\\s*[:;-]\\s*([^.,;]+)`, 'i');
+            const match = text.match(regex);
+            if (match && match[1]) {
+                const cleaned = this.cleanText(match[1]).substring(0, maxLength);
+                if (cleaned.length > 2) return cleaned;
+            }
+        }
+        return fieldType === 'cliente' ? 'Cliente não identificado' : 'Equipamento antigo';
+    }
+
+    private async extractInfoFromFile(filePath: string, osId: number): Promise<RecoveredItem | null> {
         try {
             const stats = await fs.promises.stat(filePath);
-            const dataArquivo = stats.birthtime.toLocaleDateString('pt-BR');
-            const fileName = path.basename(filePath);
-
-            let cliente = "Cliente não identificado";
-            let impressora = "Equipamento antigo";
-            let valor = "R$ 0,00";
-            let telefone = "";
-            let obs = "Sincronizado do arquivo";
-            let status = fileName.toLowerCase().includes('entregue') ? 'Aprovado - Entregue' : 'Em Análise';
-            let defeito = "Verificar arquivo físico";
-
-            // Tenta ler o conteúdo interno do Word
-            try {
-                const content = await fs.promises.readFile(filePath, 'binary');
-                const zip = new PizZip(content);
-
-                if (zip.files['word/document.xml']) {
-                    const xml = zip.files['word/document.xml'].asText();
-                    const textBody = xml.replace(/<[^>]+>/g, ' ');
-
-                    // Mineração de Dados via Regex
-                    const telMatch = textBody.match(/(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}/);
-                    if (telMatch) telefone = telMatch[0].trim();
-
-                    const valMatch = textBody.match(/R\$\s?[\d.,]+/);
-                    if (valMatch) valor = valMatch[0].trim();
-
-                    const clienteMatch = textBody.match(/(?:Cliente|Nome)\s*[:;-]\s*([^.,;]+)/i);
-                    if (clienteMatch && clienteMatch[1]) {
-                        cliente = this.cleanText(clienteMatch[1]).substring(0, 40);
-                    } else {
-                        // Fallback para nome do arquivo
-                        const parts = fileName.replace('.docx', '').split(/[-_]/);
-                        if (parts.length > 1) {
-                            const possivelNome = parts[1].trim();
-                            if (isNaN(parseInt(possivelNome)) && possivelNome.length > 2) cliente = possivelNome;
-                        }
-                    }
-
-                    const equipMatch = textBody.match(/(?:Equipamento|Aparelho|Modelo)\s*[:;-]\s*([^.,;]+)/i);
-                    if (equipMatch && equipMatch[1]) {
-                        impressora = this.cleanText(equipMatch[1]).substring(0, 30);
-                    }
-                }
-            } catch (readErr) {
-                // Se o arquivo estiver corrompido, apenas loga e segue com dados básicos extraídos do nome
-                // console.warn(`[SCAN] Erro leitura interna: ${fileName}`);
+            if (stats.size > this.MAX_FILE_SIZE) {
+                return null;
             }
 
-            return {
-                os: id,
+            // Usar mtime que é mais confiável cross-platform
+            const dataArquivo = stats.mtime.toLocaleDateString('pt-BR');
+            const fileName = path.basename(filePath);
+
+            const fallbackItem: RecoveredItem = {
+                os: osId,
                 data: dataArquivo,
-                cliente, impressora, status, valor, telefone,
-                orcamento: defeito,
-                obs
+                cliente: "Cliente não identificado",
+                impressora: "Equipamento antigo",
+                status: fileName.toLowerCase().includes('entregue') ? 'Aprovado - Entregue' : 'Em Análise',
+                valor: "R$ 0,00",
+                telefone: "",
+                orcamento: "Verificar arquivo físico",
+                obs: "Sincronizado do arquivo"
             };
+
+            try {
+                const buffer = await fs.promises.readFile(filePath);
+                const zip = new PizZip(buffer);
+
+                const xmlFile = zip.files['word/document.xml'];
+                if (!xmlFile) return fallbackItem;
+
+                const xmlContent = xmlFile.asText();
+                const extracted = this.parseDocumentXml(xmlContent);
+
+                return {
+                    ...fallbackItem,
+                    cliente: extracted.cliente || fallbackItem.cliente,
+                    impressora: extracted.impressora || fallbackItem.impressora,
+                    telefone: extracted.telefone,
+                    valor: extracted.valor
+                };
+
+            } catch {
+                return fallbackItem;
+            }
+
         } catch (e) {
             return null;
         }
     }
 
-    // --- HELPER: Processamento em Lotes (Batch Processing) ---
-    private async processBatch<T, R>(items: T[], batchSize: number, task: (item: T) => Promise<R>): Promise<R[]> {
+    private async processWithConcurrency<T, R>(
+        items: T[],
+        processFn: (item: T) => Promise<R>,
+        concurrency: number = this.CONCURRENCY_LIMIT
+    ): Promise<R[]> {
         const results: R[] = [];
-        for (let i = 0; i < items.length; i += batchSize) {
-            const batch = items.slice(i, i + batchSize);
-            const batchResults = await Promise.all(batch.map(task));
-            results.push(...batchResults);
+        const pending = new Set<Promise<void>>();
+        const totalItems = items.length;
+
+        for (const item of items) {
+            if (pending.size >= concurrency) {
+                await Promise.race(pending);
+            }
+
+            const promise = processFn(item)
+                .then(result => {
+                    this.processedCount++;
+                    // Log progressivo a cada 50 arquivos para evitar gargalo
+                    if (this.processedCount % 50 === 0) {
+                        console.log(`[SCAN] Progresso: ${this.processedCount}/${totalItems} arquivos processados`);
+                    }
+                    results.push(result);
+                })
+                .catch(error => {
+                    console.warn(`[SCAN] Erro processando item:`, error);
+                    // Adiciona resultado vazio ou marcador de erro se necessário
+                })
+                .finally(() => {
+                    pending.delete(promise);
+                });
+
+            pending.add(promise);
         }
+
+        await Promise.all(pending);
         return results;
     }
 
-    public async scanFiles(): Promise<{ success: boolean; data?: { ultimo_numero: number; historico: RecoveredItem[] }; error?: string }> {
-        console.log("[SCAN] Iniciando Varredura Otimizada...");
+    public async scanFiles(): Promise<ScanResult> {
+        console.log("[SCAN] Iniciando varredura otimizada...");
         const startTime = Date.now();
+        this.processedCount = 0; // Reset counter
 
         try {
-            if (!fs.existsSync(this.outputDir)) return { success: false, data: { ultimo_numero: 0, historico: [] } };
+            if (!fs.existsSync(this.outputDir)) {
+                return { success: true, data: { ultimo_numero: 0, historico: [] } };
+            }
 
             const files = await fs.promises.readdir(this.outputDir);
-            const docxFiles = files.filter(f => f.endsWith('.docx') && !f.startsWith('~$'));
+            const docxFiles = files.filter(f =>
+                f.endsWith('.docx') &&
+                !f.startsWith('~$') &&
+                !f.includes('temp')
+            );
 
-            console.log(`[SCAN] ${docxFiles.length} arquivos encontrados. Processando em paralelo...`);
+            console.log(`[SCAN] ${docxFiles.length} arquivos .docx encontrados`);
 
-            // Regex Rigorosa: Número deve estar no início ou após prefixo
-            const strictIdRegex = /^(?:OS|Nº|PEDIDO|ORCAMENTO)?\s*[.\-_#]?\s*(\d{1,6})/i;
+            const validFiles = docxFiles
+                .map(file => ({ file, osId: this.extractOsIdFromFilename(file) }))
+                .filter((item): item is { file: string; osId: number } => item.osId !== null);
 
-            const processFile = async (file: string): Promise<RecoveredItem | null> => {
-                const match = file.match(strictIdRegex);
-                if (!match || !match[1]) return null;
+            console.log(`[SCAN] ${validFiles.length} arquivos com ID válido`);
 
-                const id = parseInt(match[1]);
-                if (isNaN(id) || id === 0) return null;
-
-                // Reutiliza a lógica centralizada
-                return await this.extractInfoFromFile(path.join(this.outputDir, file), id);
+            const processFile = async (item: { file: string; osId: number }) => {
+                const filePath = path.join(this.outputDir, item.file);
+                const result = await this.extractInfoFromFile(filePath, item.osId);
+                return { file: item.file, item: result };
             };
 
-            // Executa em lotes de 20 para performance
-            const rawResults = await this.processBatch(docxFiles, 20, processFile);
+            const batchResults = await this.processWithConcurrency(
+                validFiles,
+                processFile,
+                Math.min(this.CONCURRENCY_LIMIT, validFiles.length)
+            );
 
-            const validResults = rawResults.filter((r): r is RecoveredItem => r !== null);
+            const validItems = batchResults
+                .filter((result): result is { file: string; item: RecoveredItem } => result.item !== null)
+                .map(result => result.item);
 
-            // Unicidade e Sequência
-            const uniqueMap = new Map<number, RecoveredItem>();
+            const itemMap = new Map<number, RecoveredItem>();
             let maxId = 0;
 
-            validResults.forEach(item => {
+            for (const item of validItems) {
                 if (item.os > maxId) maxId = item.os;
 
-                if (!uniqueMap.has(item.os)) {
-                    uniqueMap.set(item.os, item);
-                } else {
-                    const existing = uniqueMap.get(item.os)!;
-                    // Prioriza registro com nome de cliente válido
-                    if (existing.cliente.includes("não identificado") && !item.cliente.includes("não identificado")) {
-                        uniqueMap.set(item.os, item);
-                    }
+                const existing = itemMap.get(item.os);
+                if (!existing || existing.cliente.includes("não identificado")) {
+                    itemMap.set(item.os, item);
                 }
-            });
+            }
 
-            const sortedHistory = Array.from(uniqueMap.values()).sort((a, b) => a.os - b.os);
+            const historico = Array.from(itemMap.values()).sort((a, b) => a.os - b.os);
             const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-            console.log(`[SCAN] Concluído em ${duration}s. ${sortedHistory.length} OSs importadas. Próxima OS: ${maxId + 1}`);
+            console.log(`[SCAN] Concluído em ${duration}s: ${historico.length} OSs recuperadas`);
 
             return {
                 success: true,
                 data: {
                     ultimo_numero: maxId,
-                    historico: sortedHistory
+                    historico
                 }
             };
 
-        } catch (e) {
+        } catch (e: any) {
             console.error("[SCAN] Erro fatal:", e);
-            return { success: false, error: String(e) };
+            return { success: false, error: e.message };
         }
     }
 
-    // --- NOVA FUNÇÃO: Sincronizar Arquivo Único (Para edição manual) ---
     public async syncSingleFile(osId: number): Promise<{ success: boolean; data?: RecoveredItem; error?: string }> {
         try {
             const files = await fs.promises.readdir(this.outputDir);
-            // Regex específica para encontrar o arquivo desse ID
-            const idRegex = new RegExp(`^(?:OS|Nº|PEDIDO|ORCAMENTO)?\\s*[.\\-_#]?\\s*${osId}(?:\\s|\\.|-|_)`, 'i');
 
-            const targetFile = files.find(f => f.endsWith('.docx') && !f.startsWith('~$') && idRegex.test(f));
+            const targetFile = files.find(f => {
+                if (!f.endsWith('.docx') || f.startsWith('~$')) return false;
+                const fileOsId = this.extractOsIdFromFilename(f);
+                return fileOsId === osId;
+            });
 
             if (!targetFile) {
                 return { success: false, error: "Arquivo físico não encontrado." };
             }
 
-            const recoveredData = await this.extractInfoFromFile(path.join(this.outputDir, targetFile), osId);
+            const filePath = path.join(this.outputDir, targetFile);
+            const recoveredData = await this.extractInfoFromFile(filePath, osId);
 
-            if (recoveredData) {
-                return { success: true, data: recoveredData };
-            } else {
-                return { success: false, error: "Falha ao ler o arquivo." };
-            }
+            return recoveredData
+                ? { success: true, data: recoveredData }
+                : { success: false, error: "Falha ao ler o arquivo." };
 
-        } catch (e) {
-            return { success: false, error: String(e) };
+        } catch (e: any) {
+            return { success: false, error: e.message };
         }
     }
 }

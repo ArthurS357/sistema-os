@@ -1,4 +1,16 @@
 {
-    "ultimo_numero": 3832,
-    "historico": []
+    "ultimo_numero": 3833,
+    "historico": [
+        {
+            "os": 3833,
+            "data": "18/02/2026",
+            "cliente": "asdasd",
+            "telefone": "(12) 31231-2312",
+            "impressora": "asdasd",
+            "orcamento": "Em andamento",
+            "valor": "R$ 1.231,23",
+            "obs": "Deixou: Cabo Força - as",
+            "status": "Aprovado"
+        }
+    ]
 }
